@@ -1,0 +1,29 @@
+{$CADDY_SITE_ADDRESS::8080} {
+	root * /app/frontend/build
+
+	handle /api/* {
+		reverse_proxy {$BACKEND_UPSTREAM}
+	}
+
+	handle /metrics {
+		reverse_proxy {$BACKEND_UPSTREAM}
+	}
+
+	handle /reader/* {
+		try_files {path} /index.html
+		file_server
+	}
+
+	handle /healthz {
+		reverse_proxy {$BACKEND_UPSTREAM}
+	}
+
+	handle /readyz {
+		reverse_proxy {$BACKEND_UPSTREAM}
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

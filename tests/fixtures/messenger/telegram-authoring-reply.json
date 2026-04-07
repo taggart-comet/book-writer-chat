@@ -1,0 +1,20 @@
+{
+  "message": {
+    "message_id": 103,
+    "date": 1775383320,
+    "text": "Write an introductory chapter about habit formation for busy parents.",
+    "chat": {
+      "id": 123456,
+      "title": "Chat"
+    },
+    "from": {
+      "first_name": "Alice",
+      "username": "alice"
+    },
+    "reply_to_message": {
+      "from": {
+        "username": "bookbot"
+      }
+    }
+  }
+}

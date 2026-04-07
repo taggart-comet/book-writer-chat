@@ -1,0 +1,12 @@
+/target
+/.idea
+/data
+/books-data
+/frontend/node_modules
+/frontend/.svelte-kit
+/frontend/build
+/frontend/.env
+/frontend/.env.local
+/build/.caddy
+/.env
+/.env.local

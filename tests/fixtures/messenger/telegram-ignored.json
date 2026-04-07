@@ -1,0 +1,16 @@
+{
+  "message": {
+    "message_id": 104,
+    "date": 1775383380,
+    "text": "I think the next chapter should mention sleep.",
+    "chat": {
+      "id": 123456,
+      "title": "Chat"
+    },
+    "from": {
+      "first_name": "Charlie",
+      "username": "charlie"
+    },
+    "reply_to_message": null
+  }
+}
