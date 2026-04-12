@@ -23,16 +23,17 @@ mod tests {
         core::{
             config::{AppEnvironment, Config},
             models::{
-                CommandKind, JobStatus, ReaderContentResponse, ReaderErrorResponse,
+                BookLanguage, CommandKind, JobStatus, ReaderContentResponse, ReaderErrorResponse,
                 ReaderJobResponse, ReaderRevisionResponse, ReaderSummary, RevisionRenderStatus,
             },
         },
         messaging::handlers::MessageApiResponse,
+        messaging::media::FakeMediaDownloader,
         reader::{
             content::{ChapterCursor, encode_cursor},
             links::issue_token,
         },
-        storage::repository::Repository,
+        storage::{media_assets::DownloadedMedia, repository::Repository},
     };
 
     async fn test_app(executor: DynExecutor) -> (Router, Config) {
@@ -45,13 +46,22 @@ mod tests {
             frontend_dist_dir: root.join("frontend-build"),
             frontend_base_url: "http://localhost:3001".to_string(),
             telegram_bot_username: "bookbot".to_string(),
+            telegram_bot_token: None,
             max_bot_handle: "bookbot".to_string(),
+            max_access_token: None,
             reader_token_secret: "secret".to_string(),
             codex_cli_path: "codex".to_string(),
             codex_cli_args: Vec::new(),
             agent_timeout_secs: 5,
         };
-        let router = build_router(config.clone(), Some(executor)).await.unwrap();
+        let media_downloader = Arc::new(FakeMediaDownloader::new(DownloadedMedia {
+            bytes: vec![137, 80, 78, 71],
+            mime_type: Some("image/png".to_string()),
+            provider_file_path: Some("photos/test-image.png".to_string()),
+        }));
+        let router = build_router(config.clone(), Some(executor), Some(media_downloader))
+            .await
+            .unwrap();
         (router, config)
     }
 
@@ -76,9 +86,80 @@ mod tests {
         })
     }
 
-    fn extract_reader_path(reader_url: &str) -> String {
-        let (_, path) = reader_url.split_once("://").unwrap();
-        format!("/{}", path.split_once('/').unwrap().1)
+    fn telegram_photo_payload(message_id: i64, caption: &str) -> serde_json::Value {
+        serde_json::json!({
+            "message": {
+                "message_id": message_id,
+                "date": 1775385600 + message_id,
+                "caption": caption,
+                "photo": [
+                    {
+                        "file_id": "small-photo-file",
+                        "file_unique_id": "small-photo-unique",
+                        "width": 320,
+                        "height": 200,
+                        "file_size": 2048
+                    },
+                    {
+                        "file_id": "large-photo-file",
+                        "file_unique_id": "large-photo-unique",
+                        "width": 1280,
+                        "height": 900,
+                        "file_size": 4096
+                    }
+                ],
+                "chat": {"id": 123456, "title": "Chat"},
+                "from": {"first_name": "Alice"},
+                "reply_to_message": null
+            }
+        })
+    }
+
+    fn max_image_payload(message_id: &str, text: &str) -> serde_json::Value {
+        max_official_message_payload(
+            message_id,
+            text,
+            serde_json::json!([{
+                "type": "image",
+                "payload": {
+                    "photo_id": 12345,
+                    "token": "reuse-token",
+                    "url": "https://cdn.max.ru/photos/chart.jpg"
+                }
+            }]),
+        )
+    }
+
+    fn max_official_message_payload(
+        message_id: &str,
+        text: &str,
+        attachments: serde_json::Value,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "update_type": "message_created",
+            "message": {
+                "sender": {
+                    "user_id": 7,
+                    "first_name": "Bob",
+                    "last_name": null,
+                    "username": "bob",
+                    "is_bot": false,
+                    "last_activity_time": 1775385600000i64
+                },
+                "recipient": {
+                    "chat_id": 42,
+                    "chat_type": "chat",
+                    "user_id": null
+                },
+                "timestamp": 1775385600000i64,
+                "body": {
+                    "mid": message_id,
+                    "seq": 4,
+                    "text": text,
+                    "attachments": attachments
+                }
+            }
+        })
     }
 
     fn fixture_payload(name: &str) -> serde_json::Value {
@@ -233,6 +314,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn russian_init_sets_language_and_localized_reader_summary() {
+        let (app, config) = test_app(Arc::new(FakeExecutor::new(|_, _| unreachable!()))).await;
+        let response =
+            post_telegram(app.clone(), telegram_message_payload(1, "/bookbot init ru")).await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: MessageApiResponse = serde_json::from_slice(&body).unwrap();
+        let notification = payload.notification.unwrap();
+        assert!(
+            notification
+                .message
+                .contains("Рабочая область книги готова")
+        );
+
+        let repo = Repository::load(&config.data_dir).await.unwrap();
+        let book = repo
+            .find_book_by_conversation("telegram:123456")
+            .await
+            .unwrap();
+        let workspace = PathBuf::from(&book.workspace_path);
+        let manifest: serde_yaml::Value =
+            serde_yaml::from_slice(&std::fs::read(workspace.join("book.yaml")).unwrap()).unwrap();
+        assert_eq!(manifest["language"].as_str(), Some("ru"));
+
+        let token = issue_token(&config.reader_token_secret, &book.book_id, 1).unwrap();
+        let summary: ReaderSummary =
+            read_json(get(app, format!("/api/reader/summary?token={token}")).await).await;
+        assert_eq!(summary.language, BookLanguage::Russian);
+    }
+
+    #[tokio::test]
     async fn second_init_does_not_create_duplicate_book() {
         let (app, config) = test_app(Arc::new(FakeExecutor::new(|_, _| unreachable!()))).await;
 
@@ -271,6 +384,126 @@ mod tests {
         assert!(snapshot.books.is_empty());
         assert!(config.books_root.exists());
         assert_eq!(std::fs::read_dir(&config.books_root).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn image_authoring_before_init_does_not_create_workspace_files() {
+        let (app, config) = test_app(Arc::new(FakeExecutor::new(|_, _| unreachable!()))).await;
+        let response = post_telegram(
+            app,
+            telegram_photo_payload(1, "@bookbot place this image in the book"),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload: MessageApiResponse = read_json(response).await;
+        assert_eq!(
+            payload.notification.unwrap().message,
+            "Run init first so this conversation gets its own book workspace."
+        );
+        let repo = Repository::load(&config.data_dir).await.unwrap();
+        assert!(repo.snapshot().await.books.is_empty());
+        assert_eq!(std::fs::read_dir(&config.books_root).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn max_image_authoring_flow_saves_renders_and_serves_asset() {
+        let executor = Arc::new(FakeExecutor::new(|workspace, prompt| {
+            assert!(prompt.contains("Available image attachments"));
+            assert!(prompt.contains("assets/images/max-202-1.png"));
+            assert!(
+                prompt.contains(
+                    "![place this beside the opening scene](assets/images/max-202-1.png)"
+                )
+            );
+            assert!(!prompt.contains("cdn.max.ru"));
+            std::fs::write(
+                workspace.join("content/chapters/002-max-image.md"),
+                "# MAX Image Chapter\n\nHere is the image.\n\n![Opening scene](assets/images/max-202-1.png)\n",
+            )?;
+            let mut manifest: serde_yaml::Value =
+                serde_yaml::from_slice(&std::fs::read(workspace.join("book.yaml"))?)?;
+            manifest["content"]
+                .as_sequence_mut()
+                .unwrap()
+                .push(serde_yaml::from_str(
+                    "{id: chapter-max-image, kind: chapter, file: content/chapters/002-max-image.md}",
+                )?);
+            std::fs::write(
+                workspace.join("book.yaml"),
+                serde_yaml::to_string(&manifest)?,
+            )?;
+            Ok(ExecutionOutcome {
+                exit_code: Some(0),
+                timed_out: false,
+                stdout: "placed max image".to_string(),
+                stderr: String::new(),
+            })
+        }));
+        let (app, config) = test_app(executor).await;
+
+        let init: MessageApiResponse = read_json(
+            post_max(
+                app.clone(),
+                max_official_message_payload("201", "@bookbot init", serde_json::json!([])),
+            )
+            .await,
+        )
+        .await;
+        assert!(init.notification.unwrap().reader_url.is_some());
+
+        let authoring: MessageApiResponse = read_json(
+            post_max(
+                app.clone(),
+                max_image_payload("202", "@bookbot place this beside the opening scene"),
+            )
+            .await,
+        )
+        .await;
+        assert!(authoring.notification.unwrap().reader_url.is_some());
+
+        let repo = Repository::load(&config.data_dir).await.unwrap();
+        let book = repo.get_book("book-1").await.unwrap();
+        let job = repo.latest_job_for_book("book-1").await.unwrap();
+        assert_eq!(job.status, JobStatus::Succeeded);
+        assert!(
+            job.changed_files
+                .contains(&"assets/images/max-202-1.png".to_string())
+        );
+        assert_eq!(
+            std::fs::read(PathBuf::from(&book.workspace_path).join("assets/images/max-202-1.png"))
+                .unwrap(),
+            vec![137, 80, 78, 71]
+        );
+
+        let revision = repo.latest_revision_for_book("book-1").await.unwrap();
+        let token = issue_token(&config.reader_token_secret, "book-1", 1).unwrap();
+        let image_chapter: ReaderContentResponse = read_json(
+            get(
+                app.clone(),
+                format!(
+                    "/api/reader/content?token={token}&chapter_id=chapter-max-image&revision_id={}",
+                    revision.revision_id
+                ),
+            )
+            .await,
+        )
+        .await;
+        assert!(
+            image_chapter
+                .html
+                .contains("src=\"/api/reader/assets/assets/images/max-202-1.png?token=")
+        );
+
+        let asset = get(
+            app,
+            format!("/api/reader/assets/assets/images/max-202-1.png?token={token}"),
+        )
+        .await;
+        assert_eq!(asset.status(), StatusCode::OK);
+        assert_eq!(asset.headers().get("content-type").unwrap(), "image/png");
+        let asset_bytes = asset.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&asset_bytes[..], &[137, 80, 78, 71]);
     }
 
     #[tokio::test]
@@ -465,18 +698,158 @@ mod tests {
                 .contains("Busy parents can build durable routines")
         );
 
-        let reader_response = get(app, extract_reader_path(&reader_url)).await;
-        assert_eq!(reader_response.status(), StatusCode::OK);
-        let reader_body = reader_response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-        let reader_html = String::from_utf8(reader_body.to_vec()).unwrap();
-        assert!(reader_html.contains("Untitled Conversation Book"));
-        assert!(reader_html.contains("Busy parents can build durable routines"));
-        assert!(reader_html.contains(revision.revision_id.as_str()));
+        assert!(reader_url.starts_with(&format!(
+            "{}/reader/",
+            config.frontend_base_url.trim_end_matches('/')
+        )));
+    }
+
+    #[tokio::test]
+    async fn telegram_image_authoring_flow_saves_renders_and_serves_asset() {
+        let executor = Arc::new(FakeExecutor::new(|workspace, prompt| {
+            assert!(prompt.contains("Available image attachments"));
+            assert!(prompt.contains("assets/images/telegram-2-1.png"));
+            assert!(prompt.contains(
+                "![place this beside the opening scene](assets/images/telegram-2-1.png)"
+            ));
+            assert!(!prompt.contains("api.telegram.org"));
+            std::fs::write(
+                workspace.join("content/chapters/002-image.md"),
+                "# Image Chapter\n\nHere is the image.\n\n![Opening scene](assets/images/telegram-2-1.png)\n",
+            )?;
+            let mut manifest: serde_yaml::Value =
+                serde_yaml::from_slice(&std::fs::read(workspace.join("book.yaml"))?)?;
+            manifest["content"]
+                .as_sequence_mut()
+                .unwrap()
+                .push(serde_yaml::from_str(
+                    "{id: chapter-image, kind: chapter, file: content/chapters/002-image.md}",
+                )?);
+            std::fs::write(
+                workspace.join("book.yaml"),
+                serde_yaml::to_string(&manifest)?,
+            )?;
+            Ok(ExecutionOutcome {
+                exit_code: Some(0),
+                timed_out: false,
+                stdout: "placed image".to_string(),
+                stderr: String::new(),
+            })
+        }));
+        let (app, config) = test_app(executor).await;
+
+        let init: MessageApiResponse = read_json(
+            post_telegram(app.clone(), telegram_message_payload(1, "/bookbot init")).await,
+        )
+        .await;
+        assert!(init.notification.unwrap().reader_url.is_some());
+
+        let authoring: MessageApiResponse = read_json(
+            post_telegram(
+                app.clone(),
+                telegram_photo_payload(2, "@bookbot place this beside the opening scene"),
+            )
+            .await,
+        )
+        .await;
+        assert!(authoring.notification.unwrap().reader_url.is_some());
+
+        let repo = Repository::load(&config.data_dir).await.unwrap();
+        let book = repo.get_book("book-1").await.unwrap();
+        let job = repo.latest_job_for_book("book-1").await.unwrap();
+        assert_eq!(job.status, JobStatus::Succeeded);
+        assert!(
+            job.changed_files
+                .contains(&"assets/images/telegram-2-1.png".to_string())
+        );
+        assert!(
+            PathBuf::from(&book.workspace_path)
+                .join("assets/images/telegram-2-1.png")
+                .exists()
+        );
+
+        let revision = repo.latest_revision_for_book("book-1").await.unwrap();
+        let token = issue_token(&config.reader_token_secret, "book-1", 1).unwrap();
+        let first: ReaderContentResponse = read_json(
+            get(
+                app.clone(),
+                format!(
+                    "/api/reader/content?token={token}&revision_id={}",
+                    revision.revision_id
+                ),
+            )
+            .await,
+        )
+        .await;
+        let second: ReaderContentResponse = read_json(
+            get(
+                app.clone(),
+                format!(
+                    "/api/reader/content?token={token}&cursor={}&revision_id={}",
+                    first.next_cursor.unwrap(),
+                    revision.revision_id
+                ),
+            )
+            .await,
+        )
+        .await;
+        let image_chapter: ReaderContentResponse = read_json(
+            get(
+                app.clone(),
+                format!(
+                    "/api/reader/content?token={token}&cursor={}&revision_id={}",
+                    second.next_cursor.unwrap(),
+                    revision.revision_id
+                ),
+            )
+            .await,
+        )
+        .await;
+        assert!(
+            image_chapter
+                .html
+                .contains("src=\"/api/reader/assets/assets/images/telegram-2-1.png?token=")
+        );
+        let second_token = issue_token(&config.reader_token_secret, "book-1", 1).unwrap();
+        let same_chapter_new_token: ReaderContentResponse = read_json(
+            get(
+                app.clone(),
+                format!(
+                    "/api/reader/content?token={second_token}&chapter_id=chapter-image&revision_id={}",
+                    revision.revision_id
+                ),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(
+            same_chapter_new_token.content_hash,
+            image_chapter.content_hash
+        );
+
+        let asset = get(
+            app.clone(),
+            format!("/api/reader/assets/assets/images/telegram-2-1.png?token={token}"),
+        )
+        .await;
+        assert_eq!(asset.status(), StatusCode::OK);
+        assert_eq!(asset.headers().get("content-type").unwrap(), "image/png");
+        let asset_bytes = asset.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&asset_bytes[..], &[137, 80, 78, 71]);
+
+        let invalid = get(
+            app.clone(),
+            "/api/reader/assets/assets/images/telegram-2-1.png?token=bad-token",
+        )
+        .await;
+        assert_eq!(invalid.status(), StatusCode::UNAUTHORIZED);
+
+        let traversal = get(
+            app,
+            format!("/api/reader/assets/assets/images/../book.yaml?token={token}"),
+        )
+        .await;
+        assert_eq!(traversal.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -624,56 +997,32 @@ mod tests {
         assert!(second_content.html.contains("Tomatoes climb the trellis"));
         assert!(!second_content.html.contains("coastal beacon"));
 
-        let first_reader = get(
-            app.clone(),
-            extract_reader_path(
-                first_authoring
-                    .notification
-                    .as_ref()
-                    .unwrap()
-                    .reader_url
-                    .as_ref()
-                    .unwrap(),
-            ),
-        )
-        .await;
-        let second_reader = get(
-            app,
-            extract_reader_path(
-                second_authoring
-                    .notification
-                    .as_ref()
-                    .unwrap()
-                    .reader_url
-                    .as_ref()
-                    .unwrap(),
-            ),
-        )
-        .await;
-        let first_reader_html = String::from_utf8(
-            first_reader
-                .into_body()
-                .collect()
-                .await
+        assert!(
+            first_authoring
+                .notification
+                .as_ref()
                 .unwrap()
-                .to_bytes()
-                .to_vec(),
-        )
-        .unwrap();
-        let second_reader_html = String::from_utf8(
-            second_reader
-                .into_body()
-                .collect()
-                .await
+                .reader_url
+                .as_ref()
                 .unwrap()
-                .to_bytes()
-                .to_vec(),
-        )
-        .unwrap();
-        assert!(first_reader_html.contains("coastal beacon"));
-        assert!(!first_reader_html.contains("Tomatoes climb the trellis"));
-        assert!(second_reader_html.contains("Tomatoes climb the trellis"));
-        assert!(!second_reader_html.contains("coastal beacon"));
+                .starts_with(&format!(
+                    "{}/reader/",
+                    config.frontend_base_url.trim_end_matches('/')
+                ))
+        );
+        assert!(
+            second_authoring
+                .notification
+                .as_ref()
+                .unwrap()
+                .reader_url
+                .as_ref()
+                .unwrap()
+                .starts_with(&format!(
+                    "{}/reader/",
+                    config.frontend_base_url.trim_end_matches('/')
+                ))
+        );
     }
 
     #[tokio::test]
@@ -859,6 +1208,17 @@ mod tests {
         assert_eq!(job.status, JobStatus::Succeeded);
         assert!(job.finished_at.is_some());
 
+        let expired_token = issue_token(&config.reader_token_secret, book_id, -1).unwrap();
+        let expired = get(
+            app.clone(),
+            format!("/api/reader/summary?token={expired_token}"),
+        )
+        .await;
+        assert_eq!(expired.status(), StatusCode::FORBIDDEN);
+        let expired: ReaderErrorResponse = read_json(expired).await;
+        assert_eq!(expired.code, "access_denied");
+        assert_eq!(expired.message, "reader token expired");
+
         let invalid = get(app, "/api/reader/summary?token=bad-token").await;
         assert_eq!(invalid.status(), StatusCode::UNAUTHORIZED);
         let invalid: ReaderErrorResponse = read_json(invalid).await;
@@ -962,8 +1322,9 @@ mod tests {
         let revision = get(app.clone(), format!("/api/reader/revision?token={token}")).await;
         assert_eq!(revision.status(), StatusCode::OK);
         let revision: ReaderRevisionResponse = read_json(revision).await;
-        assert_eq!(revision.render_status, RevisionRenderStatus::Ready);
-        assert!(revision.render_error.is_none());
+        assert_eq!(revision.render_status, RevisionRenderStatus::Failed);
+        assert!(revision.content_hash.is_none());
+        assert!(revision.render_error.is_some());
 
         let job = get(app.clone(), format!("/api/reader/job?token={token}")).await;
         assert_eq!(job.status(), StatusCode::OK);
@@ -975,9 +1336,9 @@ mod tests {
         );
 
         let content = get(app, format!("/api/reader/content?token={token}")).await;
-        assert_eq!(content.status(), StatusCode::OK);
-        let content: ReaderContentResponse = read_json(content).await;
-        assert_eq!(content.chapter_id, "title-page");
+        assert_eq!(content.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let content: ReaderErrorResponse = read_json(content).await;
+        assert_eq!(content.code, "render_failed");
     }
 
     #[tokio::test]

@@ -73,6 +73,23 @@ At the high level, the frontend should provide:
 
 The frontend should not assume the final internal structure of the book yet. It must be prepared to render a backend-defined content contract that may evolve while the manuscript model is still being specified.
 
+## Selection Reference Tools
+
+The reader must support selecting visible book text and copying it for authoring feedback.
+
+Required selection actions:
+
+- Copy text: copies the selected rendered text exactly enough for ordinary paste workflows.
+- Copy reference: copies a manuscript reference suitable for pasting into the messenger conversation that drives edits.
+
+The copied reference must include:
+
+- the Markdown source file path for the selected rendered text
+- the selected line and character span in that source file
+- the selected rendered text as a quoted excerpt
+
+This is an intentional authoring workflow exception to the frontend’s normal render-oriented boundary. The frontend must still not fetch raw manuscript files directly; it may consume source-reference metadata only when that metadata is emitted by the reader API as part of render output.
+
 ## Integration Requirements
 
 The frontend must integrate with the Rust backend for:

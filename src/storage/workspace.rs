@@ -7,7 +7,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
-use crate::core::models::Book;
+use crate::core::models::{Book, BookLanguage};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestContentEntry {
@@ -55,6 +55,15 @@ pub fn workspace_dir(root: &Path, conversation_id: &str) -> PathBuf {
 }
 
 pub fn ensure_workspace(root: &Path, conversation_id: &str, book: &Book) -> Result<PathBuf> {
+    ensure_workspace_with_language(root, conversation_id, book, BookLanguage::English)
+}
+
+pub fn ensure_workspace_with_language(
+    root: &Path,
+    conversation_id: &str,
+    book: &Book,
+    language: BookLanguage,
+) -> Result<PathBuf> {
     let workspace = workspace_dir(root, conversation_id);
     std::fs::create_dir_all(workspace.join("assets/images"))?;
     std::fs::create_dir_all(workspace.join("content/frontmatter"))?;
@@ -65,8 +74,8 @@ pub fn ensure_workspace(root: &Path, conversation_id: &str, book: &Book) -> Resu
         book_id: book.book_id.clone(),
         conversation_key: conversation_id.to_string(),
         title: book.title.clone(),
-        subtitle: "Draft in progress".to_string(),
-        language: "en".to_string(),
+        subtitle: localized_subtitle(language).to_string(),
+        language: language.code().to_string(),
         render_profile: "standard-book".to_string(),
         repository: None,
         content: vec![
@@ -117,7 +126,7 @@ pub fn ensure_workspace(root: &Path, conversation_id: &str, book: &Book) -> Resu
     )?;
     write_if_missing(
         &workspace.join("content/chapters/001-opening.md"),
-        "# Opening\n\nThis conversation is ready for authoring.\n",
+        localized_opening(language),
     )?;
     Ok(workspace)
 }
@@ -128,10 +137,30 @@ pub fn read_manifest(workspace: &Path) -> Result<BookManifest> {
     )?)?)
 }
 
+pub fn read_book_language(workspace: &Path) -> BookLanguage {
+    read_manifest(workspace)
+        .map(|manifest| BookLanguage::from_manifest_code(&manifest.language))
+        .unwrap_or_default()
+}
+
 pub fn read_style(workspace: &Path) -> Result<StyleConfig> {
     Ok(serde_yaml::from_slice(&std::fs::read(
         workspace.join("style.yaml"),
     )?)?)
+}
+
+fn localized_subtitle(language: BookLanguage) -> &'static str {
+    match language {
+        BookLanguage::English => "Draft in progress",
+        BookLanguage::Russian => "Черновик в работе",
+    }
+}
+
+fn localized_opening(language: BookLanguage) -> &'static str {
+    match language {
+        BookLanguage::English => "# Opening\n\nThis conversation is ready for authoring.\n",
+        BookLanguage::Russian => "# Начало\n\nЭта беседа готова для работы над книгой.\n",
+    }
 }
 
 pub fn snapshot_workspace(workspace: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
@@ -224,7 +253,32 @@ mod tests {
         let manifest = read_manifest(&workspace).unwrap();
         assert_eq!(manifest.book_id, "book-1");
         assert_eq!(manifest.conversation_key, "telegram:1");
+        assert_eq!(manifest.language, "en");
         assert_eq!(manifest.assets.images_dir, "assets/images");
         assert_eq!(manifest.content.len(), 2);
+    }
+
+    #[test]
+    fn creates_russian_workspace_template() {
+        let dir = tempdir().unwrap();
+        let book = Book {
+            book_id: "book-1".to_string(),
+            conversation_id: "telegram:1".to_string(),
+            title: "Sample".to_string(),
+            status: BookStatus::Active,
+            workspace_path: String::new(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let workspace =
+            ensure_workspace_with_language(dir.path(), "telegram:1", &book, BookLanguage::Russian)
+                .unwrap();
+
+        let manifest = read_manifest(&workspace).unwrap();
+        assert_eq!(manifest.language, "ru");
+        assert_eq!(manifest.subtitle, "Черновик в работе");
+        let opening =
+            std::fs::read_to_string(workspace.join("content/chapters/001-opening.md")).unwrap();
+        assert!(opening.contains("Эта беседа готова"));
     }
 }

@@ -87,7 +87,6 @@ The Codex CLI execution may run:
 - authoring sessions
 - writing jobs
 - revisions
-- render snapshots or render metadata
 - repository linkage metadata
 
 ### Agent-owned mutable workspace

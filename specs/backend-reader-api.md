@@ -35,6 +35,7 @@ The MVP routes are:
 - `GET /api/reader/content?token={token}`
 - `GET /api/reader/content?token={token}&chapter_id={chapter_id}&revision_id={revision_id}`
 - `GET /api/reader/content?token={token}&cursor={cursor}&revision_id={revision_id}`
+- `GET /api/reader/assets/{asset_path}?token={token}`
 - `GET /api/reader/revision?token={token}`
 - `GET /api/reader/job?token={token}`
 
@@ -49,6 +50,7 @@ Example fields:
 - `book_id`
 - `title`
 - `subtitle`
+- `language` (`en` or `ru`)
 - `status`
 - `last_revision_id`
 - `last_updated_at`
@@ -70,24 +72,41 @@ Behavioral rules:
 - the backend determines how much content to return per request
 - the frontend may request a starting position, but not the response size
 - the API exposes stable logical handles through chapter ids and revision-bound cursors
-- internal Markdown filenames and storage layout must not be part of the public frontend contract
-- if line-based offsets are used internally, they should remain a backend concern or be exposed only through an abstract cursor-like handle
+- internal Markdown filenames and storage layout must not be part of the public frontend contract except for explicit authoring-reference metadata emitted with rendered reader content
+- line-based offsets should remain a backend concern except when emitted as source-reference metadata for selected rendered text
 
 MVP response strategy:
 
 - structured JSON envelopes for frontend state
 - pre-rendered chapter HTML fragments for book body content
+- source-reference annotations on rendered text where the backend can map HTML back to manuscript Markdown
 
 A chunked response should include enough metadata for the frontend to continue loading, such as:
 
 - `revision_id`
 - `content_hash`
 - chapter identifier or index
+- chapter source file path for authoring references
 - returned HTML fragment
 - `next_cursor`
 - `has_more`
 
 The cursor is opaque to the frontend and is bound to a specific revision. If the frontend sends a stale `revision_id` or a cursor from an older revision, the backend returns an explicit stale-revision error instead of silently mixing content from different renders.
+
+Rendered text spans may include source-reference attributes that identify the Markdown source file, start line/character, and end line/character for that rendered text. The frontend may use these attributes only to copy a reference for messenger-driven authoring feedback; it must not treat them as a general source-file API.
+
+### Reader Asset Endpoint
+
+The reader asset endpoint serves signed access to image files referenced by rendered manuscript HTML.
+
+V1 behavior:
+
+- the same reader token model is required as the JSON endpoints
+- only workspace-relative paths under `assets/images/` are valid
+- absolute paths, parent-directory traversal, and non-image paths must be rejected
+- supported served image types are JPEG, PNG, GIF, and WebP
+- content HTML may rewrite Markdown image paths such as `assets/images/example.png` into `/api/reader/assets/assets/images/example.png?token={token}`
+- `content_hash` must remain based on token-free rendered content so it is stable across reader tokens
 
 ### Revision Endpoint
 
@@ -143,8 +162,8 @@ For MVP, the system should standardize on this approach:
 
 1. The canonical manuscript source remains in the workspace.
 2. The backend assembles and validates the manuscript.
-3. The backend writes a deterministic render snapshot for each successfully rendered revision.
-4. The backend exposes render-ready content through the reader API from the latest render snapshot.
+3. The backend renders the current workspace files when reader endpoints are requested.
+4. The backend exposes render-ready content through the reader API without persisting rendered snapshots.
 
 This separates authoring storage from frontend presentation and allows the internal manuscript format to evolve without breaking the frontend contract.
 
@@ -186,8 +205,6 @@ Important MVP error codes include:
 - `chapter_not_found`
 - `stale_revision`
 - `render_failed`
-- `render_snapshot_missing`
-- `render_snapshot_invalid`
 
 ## Open Questions
 

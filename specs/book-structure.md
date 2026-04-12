@@ -125,6 +125,8 @@ assets:
   images_dir: assets/images
 ```
 
+The currently supported language values are `en` for English and `ru` for Russian. Existing manifests with a missing or unrecognized language should be treated as English by default.
+
 ## File Naming Conventions
 
 Naming should be deterministic and easy for an agent to extend.
@@ -223,6 +225,8 @@ The storage model should separate:
 ## Recommended Image Storage Model
 
 Image files should live under `assets/images/`.
+
+V1 messenger image intake stores downloaded Telegram and MAX image files in this directory with deterministic safe filenames such as `telegram-<message-id>-<index>.png` or `max-<message-id>-<index>.png`. The backend supplies the saved workspace-relative paths to the authoring agent, and the agent places plain Markdown image references in manuscript files. The richer central YAML registry described below remains the preferred long-term model, but it is not required for v1 placement.
 
 Each image may optionally have associated metadata recorded either:
 

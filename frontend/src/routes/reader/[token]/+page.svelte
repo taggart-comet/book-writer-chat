@@ -5,10 +5,14 @@
   import {
     AlertTriangle,
     BookOpenText,
-    Clock3,
+    ChevronLeft,
+    ChevronRight,
+    Copy,
+    Link2,
+    ListTree,
     LoaderCircle,
-    RefreshCcw,
-    Sparkles
+    Menu,
+    RefreshCcw
   } from 'lucide-svelte';
   import {
     fetchContent,
@@ -25,14 +29,137 @@
   const { params } = $props<{ params: { token: string } }>();
 
   const pollingStatuses = new Set(['received', 'accepted', 'running']);
+  const BOOK_WORDS_PER_PAGE = 320;
+  const BOOK_FONT_SIZE_PX = 18;
 
   type NoticeTone = 'neutral' | 'warm' | 'success' | 'danger';
   type ReaderViewState = 'loading' | 'ready' | 'empty' | 'render_failed' | 'error';
+  type ReaderLanguage = 'en' | 'ru';
 
   type ReaderNotice = {
     tone: NoticeTone;
     title: string;
     body: string;
+  };
+
+  type BookPage = {
+    pageNumber: number;
+    chapterId: string;
+    chapterTitle: string;
+    sourceFile: string;
+    html: string;
+  };
+
+  type ChapterNavItem = {
+    chapterId: string;
+    title: string;
+    pageIndex: number;
+    pageNumber: number;
+  };
+
+  type SourcePoint = {
+    sourceFile: string;
+    line: number;
+    character: number;
+  };
+
+  const readerCopy = {
+    en: {
+      reader: 'Reader',
+      loadingTitle: 'Loading the latest draft',
+      loadingCopy: 'The reader is assembling the current revision and chapter sequence.',
+      readerUnavailable: 'Reader unavailable',
+      readerLoadFailed: 'The reader could not load this draft.',
+      tryAgain: 'Try again',
+      chapterShelf: 'Chapter shelf',
+      chapterNavigation: 'Chapter navigation',
+      chapters: 'Chapters',
+      openMenu: 'Open chapters',
+      closeMenu: 'Close menu',
+      pageAbbr: 'p.',
+      refreshDraft: 'Refresh draft',
+      position: 'Position',
+      pageSettings: 'Page settings',
+      wordsPerPage: `${BOOK_WORDS_PER_PAGE} words per page`,
+      bookTextSize: `${BOOK_FONT_SIZE_PX}px book text`,
+      noPagesYet: 'No pages yet',
+      noChapterSelected: 'No chapter selected',
+      pagePosition: (page: number, total: number) => `Page ${page} of ${total}`,
+      renderFailedTitle: 'Latest revision could not be rendered',
+      renderFailedBody: 'The draft exists, but the browser view for this revision is unavailable.',
+      draftRefreshedTitle: 'Draft refreshed',
+      runningTitle: 'New pages may be on the way',
+      runningBody: 'The page will refresh while the current writing job is running.',
+      shellReadyTitle: 'The shell is ready',
+      shellReadyBody: 'This book does not have any rendered chapters yet.',
+      accessDeniedTitle: 'Reader link expired or invalid',
+      requestFailedTitle: 'Reader request failed',
+      renderOutputUnavailable: 'Render output unavailable',
+      noChaptersYet: 'No chapters yet',
+      emptyReaderBody: 'Once the first revision is rendered, the reading view will appear here.',
+      settingChapterPages: 'Setting chapter pages',
+      selectionToolbarLabel: 'Selected text actions',
+      copyText: 'Copy text',
+      copyReference: 'Copy reference',
+      copiedText: 'Copied text',
+      copiedReference: 'Copied reference',
+      previousPage: 'Previous page',
+      nextPage: 'Next page',
+      loadingPages: 'Loading pages',
+      loadRemainingPages: 'Load remaining pages',
+      staleRevision: (oldRevision: string, newRevision: string) =>
+        `A newer revision replaced ${oldRevision} with ${newRevision}. The page reset to the latest chapter sequence.`,
+      staleContinuation:
+        'The draft changed while you were reading. The page reloaded to keep continuation aligned with the newest render.'
+    },
+    ru: {
+      reader: 'Читалка',
+      loadingTitle: 'Загружаем последний черновик',
+      loadingCopy: 'Читательский вид собирает текущую версию и порядок глав.',
+      readerUnavailable: 'Читательский вид недоступен',
+      readerLoadFailed: 'Не удалось загрузить этот черновик.',
+      tryAgain: 'Попробовать еще раз',
+      chapterShelf: 'Полка глав',
+      chapterNavigation: 'Навигация по главам',
+      chapters: 'Главы',
+      openMenu: 'Открыть главы',
+      closeMenu: 'Закрыть меню',
+      pageAbbr: 'с.',
+      refreshDraft: 'Обновить черновик',
+      position: 'Позиция',
+      pageSettings: 'Параметры страницы',
+      wordsPerPage: `${BOOK_WORDS_PER_PAGE} слов на страницу`,
+      bookTextSize: `Текст книги ${BOOK_FONT_SIZE_PX}px`,
+      noPagesYet: 'Страниц пока нет',
+      noChapterSelected: 'Глава не выбрана',
+      pagePosition: (page: number, total: number) => `Страница ${page} из ${total}`,
+      renderFailedTitle: 'Последнюю версию не удалось отобразить',
+      renderFailedBody: 'Черновик существует, но вид для этой версии недоступен.',
+      draftRefreshedTitle: 'Черновик обновлен',
+      runningTitle: 'Скоро могут появиться новые страницы',
+      runningBody: 'Страница будет обновляться, пока выполняется текущая задача написания.',
+      shellReadyTitle: 'Читательский вид готов',
+      shellReadyBody: 'У этой книги пока нет отображенных глав.',
+      accessDeniedTitle: 'Ссылка на чтение истекла или недействительна',
+      requestFailedTitle: 'Запрос к читательскому виду не удался',
+      renderOutputUnavailable: 'Отображение недоступно',
+      noChaptersYet: 'Глав пока нет',
+      emptyReaderBody: 'Когда первая версия будет отображена, читательский вид появится здесь.',
+      settingChapterPages: 'Размечаем страницы глав',
+      selectionToolbarLabel: 'Действия с выделенным текстом',
+      copyText: 'Копировать текст',
+      copyReference: 'Копировать ссылку',
+      copiedText: 'Текст скопирован',
+      copiedReference: 'Ссылка скопирована',
+      previousPage: 'Предыдущая страница',
+      nextPage: 'Следующая страница',
+      loadingPages: 'Загружаем страницы',
+      loadRemainingPages: 'Загрузить остальные страницы',
+      staleRevision: (oldRevision: string, newRevision: string) =>
+        `Новая версия заменила ${oldRevision} на ${newRevision}. Страница открыла последний порядок глав.`,
+      staleContinuation:
+        'Черновик изменился во время чтения. Страница обновилась, чтобы продолжить с новой версии.'
+    }
   };
 
   let summary: ReaderSummary | null = $state(null);
@@ -41,79 +168,54 @@
   let chapters: ReaderContent[] = $state([]);
   let loading = $state(true);
   let loadingMore = $state(false);
+  let loadingSequence = $state(false);
   let refreshing = $state(false);
   let nextCursor: string | null = $state(null);
+  let activePageIndex = $state(0);
   let viewState: ReaderViewState = $state('loading');
-  let errorTitle = $state('Reader unavailable');
-  let errorMessage = $state('The reader could not load this draft.');
+  let errorTitle = $state(readerCopy.en.readerUnavailable);
+  let errorMessage = $state(readerCopy.en.readerLoadFailed);
   let renderFailureMessage = $state('');
   let staleRevisionNotice = $state('');
+  let selectionToolbarVisible = $state(false);
+  let selectionToolbarX = $state(0);
+  let selectionToolbarY = $state(0);
+  let selectionToolbarText = $state('');
+  let selectionToolbarReference = $state('');
+  let selectionClipboardStatus = $state('');
+  let mobileMenuOpen = $state(false);
+  let pageContentElement: HTMLDivElement | null = $state(null);
   let refreshTimer: ReturnType<typeof window.setTimeout> | null = null;
 
-  const pageTitle = $derived.by(() => (summary ? `${summary.title} | Reader` : 'Reader'));
+  function language(): ReaderLanguage {
+    return summary?.language === 'ru' ? 'ru' : 'en';
+  }
+
+  function copy() {
+    return readerCopy[language()];
+  }
+
+  const pageTitle = $derived.by(() => (summary ? `${summary.title} | ${copy().reader}` : copy().reader));
   const activeRevisionId = $derived.by(() => revision?.revision_id ?? summary?.last_revision_id ?? null);
-  const chapterLabel = $derived.by(() =>
-    summary?.chapter_count === 1 ? '1 chapter' : `${summary?.chapter_count ?? 0} chapters`
-  );
-  const freshnessLabel = $derived.by(() => formatRelativeTime(summary?.last_updated_at ?? null));
-  const revisionLabel = $derived.by(() =>
-    activeRevisionId ? compactId(activeRevisionId) : 'Not rendered yet'
-  );
-  const jobBadge = $derived.by(() => resolveJobBadge(job));
-  const renderBadge = $derived.by(() => resolveRenderBadge(summary, revision));
   const surfaceNotice = $derived.by(() =>
     resolveSurfaceNotice(viewState, job, renderFailureMessage, staleRevisionNotice)
   );
+  const bookPages = $derived.by(() => paginateChapters(chapters));
+  const activePage = $derived.by(() => {
+    if (bookPages.length === 0) {
+      return null;
+    }
+
+    return bookPages[Math.min(activePageIndex, bookPages.length - 1)];
+  });
+  const chapterNavItems = $derived.by(() => buildChapterNavItems(chapters, bookPages));
+  const pagePositionLabel = $derived.by(() =>
+    activePage ? copy().pagePosition(activePage.pageNumber, bookPages.length) : copy().noPagesYet
+  );
+  const activeChapterTitle = $derived.by(() => activePage?.chapterTitle ?? copy().noChapterSelected);
 
   function compactId(value: string): string {
     return value.length > 14 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value;
-  }
-
-  function formatAbsoluteTime(value: string | null | undefined): string | null {
-    if (!value) {
-      return null;
-    }
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return null;
-    }
-
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'short'
-    }).format(date);
-  }
-
-  function formatRelativeTime(value: string | null | undefined): string {
-    if (!value) {
-      return 'Waiting for the first revision';
-    }
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return 'Revision time unavailable';
-    }
-
-    const diffMs = Date.now() - date.getTime();
-    const diffMinutes = Math.round(diffMs / 60000);
-    const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
-
-    if (Math.abs(diffMinutes) < 1) {
-      return 'Updated just now';
-    }
-
-    if (Math.abs(diffMinutes) < 60) {
-      return `Updated ${formatter.format(-diffMinutes, 'minute')}`;
-    }
-
-    const diffHours = Math.round(diffMinutes / 60);
-    if (Math.abs(diffHours) < 48) {
-      return `Updated ${formatter.format(-diffHours, 'hour')}`;
-    }
-
-    const diffDays = Math.round(diffHours / 24);
-    return `Updated ${formatter.format(-diffDays, 'day')}`;
   }
 
   function titleCase(value: string | null | undefined): string {
@@ -128,70 +230,146 @@
       .join(' ');
   }
 
-  function resolveJobBadge(currentJob: ReaderJob | null) {
-    if (!currentJob) {
-      return {
-        label: 'Quiet',
-        detail: 'No active writing job',
-        tone: 'neutral' as NoticeTone
-      };
-    }
-
-    if (pollingStatuses.has(currentJob.status)) {
-      return {
-        label: 'Updating',
-        detail: currentJob.user_facing_message ?? 'A writing job is still working through the draft.',
-        tone: 'warm' as NoticeTone
-      };
-    }
-
-    if (currentJob.status === 'succeeded') {
-      return {
-        label: 'Current',
-        detail: currentJob.user_facing_message ?? 'The latest writing job finished successfully.',
-        tone: 'success' as NoticeTone
-      };
-    }
-
-    if (currentJob.status === 'failed' || currentJob.status === 'timed_out' || currentJob.status === 'cancelled') {
-      return {
-        label: titleCase(currentJob.status),
-        detail: currentJob.user_facing_message ?? 'The latest writing job did not finish cleanly.',
-        tone: 'danger' as NoticeTone
-      };
-    }
-
-    return {
-      label: titleCase(currentJob.status),
-      detail: currentJob.user_facing_message ?? 'The latest writing job changed state.',
-      tone: 'neutral' as NoticeTone
-    };
+  function wordCount(value: string): number {
+    return value.trim().split(/\s+/).filter(Boolean).length;
   }
 
-  function resolveRenderBadge(currentSummary: ReaderSummary | null, currentRevision: ReaderRevision | null) {
-    const status = currentRevision?.render_status ?? currentSummary?.render_status ?? 'pending';
-
-    if (status === 'ready') {
-      return {
-        label: 'Readable',
-        detail: 'The current revision has a render snapshot ready.',
-        tone: 'success' as NoticeTone
-      };
+  function htmlWordCount(value: string): number {
+    if (typeof DOMParser === 'undefined') {
+      return wordCount(value.replace(/<[^>]+>/g, ' '));
     }
 
-    if (status === 'failed') {
-      return {
-        label: 'Render issue',
-        detail: 'The newest revision exists, but its reader render failed.',
-        tone: 'danger' as NoticeTone
-      };
+    const parsed = new DOMParser().parseFromString(value, 'text/html');
+    return wordCount(parsed.body.textContent ?? '');
+  }
+
+  function htmlLayoutWeight(value: string): number {
+    const words = htmlWordCount(value);
+    return /<img\b/i.test(value) ? Math.max(words, Math.round(BOOK_WORDS_PER_PAGE * 0.65)) : words;
+  }
+
+  function paginateChapters(currentChapters: ReaderContent[]): BookPage[] {
+    const pages: BookPage[] = [];
+
+    for (const chapter of currentChapters) {
+      const parserUnavailable = typeof document === 'undefined';
+      const container = parserUnavailable ? null : document.createElement('template');
+      const blocks = container
+        ? (() => {
+            container.innerHTML = chapter.html;
+            return Array.from(container.content.childNodes)
+              .map((node) => {
+                if (node.nodeType === Node.TEXT_NODE) {
+                  const text = node.textContent?.trim();
+                  return text ? `<p>${text}</p>` : '';
+                }
+
+                if (node instanceof HTMLElement) {
+                  return node.outerHTML;
+                }
+
+                return '';
+              })
+              .filter(Boolean);
+          })()
+        : [chapter.html];
+
+      let pageHtml = '';
+      let pageWords = 0;
+
+      for (const block of blocks.length > 0 ? blocks : [chapter.html]) {
+        const blockWords = htmlLayoutWeight(block);
+        const shouldStartPage =
+          pageHtml && pageWords + blockWords > BOOK_WORDS_PER_PAGE && pageWords > BOOK_WORDS_PER_PAGE * 0.45;
+
+        if (shouldStartPage) {
+          pages.push({
+            pageNumber: pages.length + 1,
+            chapterId: chapter.chapter_id,
+            chapterTitle: chapter.title,
+            sourceFile: chapter.source_file,
+            html: pageHtml
+          });
+          pageHtml = '';
+          pageWords = 0;
+        }
+
+        pageHtml += block;
+        pageWords += blockWords;
+      }
+
+      if (pageHtml || chapter.html.trim()) {
+        pages.push({
+          pageNumber: pages.length + 1,
+          chapterId: chapter.chapter_id,
+          chapterTitle: chapter.title,
+          sourceFile: chapter.source_file,
+          html: pageHtml || chapter.html
+        });
+      }
     }
 
-    return {
-      label: 'Rendering',
-      detail: 'The backend is still preparing the reader view.',
-      tone: 'warm' as NoticeTone
-    };
+    return pages;
+  }
+
+  function buildChapterNavItems(
+    currentChapters: ReaderContent[],
+    currentPages: BookPage[]
+  ): ChapterNavItem[] {
+    return currentChapters.map((chapter) => {
+      const pageIndex = Math.max(
+        currentPages.findIndex((page) => page.chapterId === chapter.chapter_id),
+        0
+      );
+
+      return {
+        chapterId: chapter.chapter_id,
+        title: chapter.title,
+        pageIndex,
+        pageNumber: currentPages[pageIndex]?.pageNumber ?? 1
+      };
+    });
+  }
+
+  function goToPage(pageIndex: number) {
+    activePageIndex = Math.min(Math.max(pageIndex, 0), Math.max(bookPages.length - 1, 0));
+    mobileMenuOpen = false;
+    clearSelectionToolbar();
+  }
+
+  function closeMobileMenu() {
+    mobileMenuOpen = false;
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      mobileMenuOpen = false;
+    }
+  }
+
+  function previousPage() {
+    goToPage(activePageIndex - 1);
+  }
+
+  function nextPage() {
+    goToPage(activePageIndex + 1);
+  }
+
+  async function fetchRemainingChapters(firstChapter: ReaderContent, firstCursor: string | null) {
+    const sequence = [firstChapter];
+    let cursor = firstCursor;
+
+    while (cursor) {
+      const nextChapter = await fetchContent(params.token, {
+        cursor,
+        revisionId: firstChapter.revision_id
+      });
+
+      sequence.push(nextChapter);
+      cursor = nextChapter.next_cursor;
+    }
+
+    return sequence;
   }
 
   function resolveSurfaceNotice(
@@ -203,15 +381,15 @@
     if (currentState === 'render_failed') {
       return {
         tone: 'danger',
-        title: 'Latest revision could not be rendered',
-        body: currentRenderFailure || 'The draft exists, but the browser view for this revision is unavailable.'
+        title: copy().renderFailedTitle,
+        body: currentRenderFailure || copy().renderFailedBody
       };
     }
 
     if (currentStaleNotice) {
       return {
         tone: 'warm',
-        title: 'Draft refreshed',
+        title: copy().draftRefreshedTitle,
         body: currentStaleNotice
       };
     }
@@ -219,16 +397,16 @@
     if (currentJob && pollingStatuses.has(currentJob.status)) {
       return {
         tone: 'warm',
-        title: 'New pages may be on the way',
-        body: currentJob.user_facing_message ?? 'The page will refresh while the current writing job is running.'
+        title: copy().runningTitle,
+        body: currentJob.user_facing_message ?? copy().runningBody
       };
     }
 
     if (currentState === 'empty') {
       return {
         tone: 'neutral',
-        title: 'The shell is ready',
-        body: 'This book does not have any rendered chapters yet.'
+        title: copy().shellReadyTitle,
+        body: copy().shellReadyBody
       };
     }
 
@@ -244,8 +422,11 @@
       }
 
       if (cause.code === 'access_denied') {
-        errorTitle = 'Reader link expired or invalid';
-        errorMessage = cause.message;
+        const expired = cause.status === 403 || cause.message.toLowerCase().includes('expired');
+        errorTitle = expired ? copy().accessDeniedTitle : copy().readerUnavailable;
+        errorMessage = expired
+          ? copy().accessDeniedTitle
+          : cause.message;
         viewState = 'error';
         return;
       }
@@ -256,9 +437,143 @@
       return;
     }
 
-    errorTitle = 'Reader request failed';
-    errorMessage = cause instanceof Error ? cause.message : 'The reader could not load this draft.';
+    errorTitle = copy().requestFailedTitle;
+    errorMessage = cause instanceof Error ? cause.message : copy().readerLoadFailed;
     viewState = 'error';
+  }
+
+  function clearSelectionToolbar() {
+    selectionToolbarVisible = false;
+    selectionToolbarText = '';
+    selectionToolbarReference = '';
+    selectionClipboardStatus = '';
+  }
+
+  function characterCount(value: string): number {
+    return Array.from(value).length;
+  }
+
+  function selectedPointFromSpan(span: HTMLElement, offset: number): SourcePoint | null {
+    const sourceFile = span.dataset.sourceFile;
+    const startLine = Number(span.dataset.sourceStartLine);
+    const startCharacter = Number(span.dataset.sourceStartChar);
+
+    if (!sourceFile || !Number.isFinite(startLine) || !Number.isFinite(startCharacter)) {
+      return null;
+    }
+
+    const prefix = (span.textContent ?? '').slice(0, offset);
+    const prefixLines = prefix.split('\n');
+    const line = startLine + prefixLines.length - 1;
+    const character =
+      prefixLines.length === 1
+        ? startCharacter + characterCount(prefix)
+        : characterCount(prefixLines[prefixLines.length - 1] ?? '') + 1;
+
+    return { sourceFile, line, character };
+  }
+
+  function selectionSourcePoints(range: Range): { start: SourcePoint; end: SourcePoint } | null {
+    if (!pageContentElement || !range.intersectsNode(pageContentElement)) {
+      return null;
+    }
+
+    const walker = document.createTreeWalker(pageContentElement, NodeFilter.SHOW_TEXT);
+    const points: { start: SourcePoint; end: SourcePoint }[] = [];
+
+    while (walker.nextNode()) {
+      const textNode = walker.currentNode as Text;
+      if (!textNode.textContent || !range.intersectsNode(textNode)) {
+        continue;
+      }
+
+      const span = textNode.parentElement?.closest<HTMLElement>('[data-source-file]');
+      if (!span) {
+        continue;
+      }
+
+      const startOffset = textNode === range.startContainer ? range.startOffset : 0;
+      const endOffset = textNode === range.endContainer ? range.endOffset : textNode.textContent.length;
+
+      if (endOffset <= startOffset) {
+        continue;
+      }
+
+      const start = selectedPointFromSpan(span, startOffset);
+      const end = selectedPointFromSpan(span, endOffset);
+
+      if (start && end) {
+        points.push({ start, end });
+      }
+    }
+
+    const first = points[0];
+    const last = points[points.length - 1];
+    return first && last ? { start: first.start, end: last.end } : null;
+  }
+
+  function formatSourceReference(start: SourcePoint, end: SourcePoint): string {
+    if (start.sourceFile === end.sourceFile) {
+      return `${start.sourceFile}:${start.line}:${start.character}-${end.line}:${end.character}`;
+    }
+
+    return `${start.sourceFile}:${start.line}:${start.character} -> ${end.sourceFile}:${end.line}:${end.character}`;
+  }
+
+  function buildReferenceText(sourceReference: string, selectedText: string): string {
+    return `${sourceReference}\n\n> ${selectedText.replace(/\s+/g, ' ').trim()}`;
+  }
+
+  function updateSelectionToolbar() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      clearSelectionToolbar();
+      return;
+    }
+
+    const selectedText = selection.toString().trim();
+    const range = selection.getRangeAt(0);
+    const points = selectionSourcePoints(range);
+
+    if (!selectedText || !points) {
+      clearSelectionToolbar();
+      return;
+    }
+
+    const rect = range.getBoundingClientRect();
+    selectionToolbarText = selectedText;
+    selectionToolbarReference = buildReferenceText(formatSourceReference(points.start, points.end), selectedText);
+    selectionToolbarX = Math.min(Math.max(rect.left + rect.width / 2, 96), window.innerWidth - 96);
+    selectionToolbarY = Math.max(rect.top - 12, 16);
+    selectionClipboardStatus = '';
+    selectionToolbarVisible = true;
+  }
+
+  async function writeClipboard(value: string) {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = value;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    textarea.remove();
+  }
+
+  async function copySelectionText() {
+    await writeClipboard(selectionToolbarText);
+    selectionClipboardStatus = copy().copiedText;
+  }
+
+  async function copySelectionReference() {
+    await writeClipboard(selectionToolbarReference);
+    selectionClipboardStatus = copy().copiedReference;
   }
 
   async function loadReader(options: { background?: boolean } = {}) {
@@ -287,6 +602,7 @@
       if (!nextSummary.last_revision_id) {
         chapters = [];
         nextCursor = null;
+        activePageIndex = 0;
         viewState = 'empty';
         return;
       }
@@ -294,6 +610,7 @@
       if (nextRevision?.render_status === 'failed') {
         chapters = [];
         nextCursor = null;
+        activePageIndex = 0;
         renderFailureMessage = nextRevision.render_error ?? nextRevision.summary;
         viewState = 'render_failed';
         return;
@@ -310,20 +627,29 @@
           previousRevisionId !== firstChapter.revision_id
       );
 
-      chapters = [firstChapter];
-      nextCursor = firstChapter.next_cursor;
-      viewState = firstChapter.html.trim() || nextSummary.chapter_count > 0 ? 'ready' : 'empty';
+      loadingSequence = true;
+      chapters = await fetchRemainingChapters(firstChapter, firstChapter.next_cursor);
+      nextCursor = null;
+      activePageIndex = 0;
+      viewState = chapters.some((chapter) => chapter.html.trim()) || nextSummary.chapter_count > 0 ? 'ready' : 'empty';
 
       if (changedRevision) {
-        staleRevisionNotice = `A newer revision replaced ${compactId(previousRevisionId)} with ${compactId(firstChapter.revision_id)}. The page reset to the latest chapter sequence.`;
+        staleRevisionNotice = copy().staleRevision(
+          compactId(previousRevisionId),
+          compactId(firstChapter.revision_id)
+        );
       }
     } catch (cause) {
-      if (!background) {
+      if (cause instanceof ReaderApiError && cause.code === 'access_denied') {
+        job = null;
+        handleLoadError(cause);
+      } else if (!background) {
         handleLoadError(cause);
       }
     } finally {
       loading = false;
       refreshing = false;
+      loadingSequence = false;
       scheduleRefresh();
     }
   }
@@ -336,16 +662,24 @@
     loadingMore = true;
 
     try {
-      const nextChapter = await fetchContent(params.token, {
-        cursor: nextCursor,
-        revisionId: chapters[0]?.revision_id ?? activeRevisionId
-      });
+      let cursor: string | null = nextCursor;
+      const loadedChapters = [...chapters];
 
-      chapters = [...chapters, nextChapter];
-      nextCursor = nextChapter.next_cursor;
+      while (cursor) {
+        const nextChapter = await fetchContent(params.token, {
+          cursor,
+          revisionId: chapters[0]?.revision_id ?? activeRevisionId
+        });
+
+        loadedChapters.push(nextChapter);
+        cursor = nextChapter.next_cursor;
+      }
+
+      chapters = loadedChapters;
+      nextCursor = null;
     } catch (cause) {
       if (cause instanceof ReaderApiError && cause.code === 'stale_revision') {
-        staleRevisionNotice = 'The draft changed while you were reading. The page reloaded to keep continuation aligned with the newest render.';
+        staleRevisionNotice = copy().staleContinuation;
         await loadReader({ background: true });
         return;
       }
@@ -370,10 +704,14 @@
   }
 
   onMount(() => {
+    document.addEventListener('selectionchange', updateSelectionToolbar);
+    window.addEventListener('keydown', handleKeydown);
     void loadReader();
   });
 
   onDestroy(() => {
+    document.removeEventListener('selectionchange', updateSelectionToolbar);
+    window.removeEventListener('keydown', handleKeydown);
     if (refreshTimer) {
       window.clearTimeout(refreshTimer);
     }
@@ -388,8 +726,8 @@
   <section class="state-screen">
     <div class="state-card">
       <LoaderCircle class="spin" size={20} />
-      <p class="state-title">Loading the latest draft</p>
-      <p class="state-copy">The reader is assembling the current revision and chapter sequence.</p>
+      <p class="state-title">{copy().loadingTitle}</p>
+      <p class="state-copy">{copy().loadingCopy}</p>
     </div>
   </section>
 {:else if viewState === 'error'}
@@ -399,91 +737,95 @@
       <p class="state-title">{errorTitle}</p>
       <p class="state-copy">{errorMessage}</p>
       <button class="ghost-button" type="button" onclick={() => void loadReader()}>
-        Try again
+        {copy().tryAgain}
       </button>
     </div>
   </section>
 {:else if summary}
-  <main class="reader-shell">
+  <main class="reader-shell" lang={language()} style={`--book-font-size: ${BOOK_FONT_SIZE_PX}px`}>
+    <div class="mobile-reader-bar">
+      <button
+        class="menu-trigger"
+        type="button"
+        aria-controls="reader-chapter-menu"
+        aria-expanded={mobileMenuOpen}
+        aria-label={copy().openMenu}
+        onclick={() => (mobileMenuOpen = true)}
+      >
+        <Menu size={19} />
+      </button>
+      <div>
+        <span>{pagePositionLabel}</span>
+        <strong>{activeChapterTitle}</strong>
+      </div>
+    </div>
+
+    {#if mobileMenuOpen}
+      <button
+        class="menu-scrim"
+        type="button"
+        aria-label={copy().closeMenu}
+        onclick={closeMobileMenu}
+      ></button>
+    {/if}
+
     <section class="frame">
-      <aside class="spine">
-        <p class="eyebrow">Draft reader</p>
-        <h1>{summary.title}</h1>
-        <p class="subtitle">{summary.subtitle}</p>
+      <aside id="reader-chapter-menu" class:open={mobileMenuOpen} class="spine">
+        <div class="spine-title-row">
+          <div>
+            <p class="eyebrow">{copy().chapterShelf}</p>
+            <h1>{summary.title}</h1>
+          </div>
+          <button class="spine-close" type="button" aria-label={copy().closeMenu} onclick={closeMobileMenu}>
+            <ChevronLeft size={18} />
+          </button>
+        </div>
+
+        {#if chapterNavItems.length > 0}
+          <nav class="chapter-nav" aria-label={copy().chapterNavigation}>
+            <div class="nav-heading">
+              <ListTree size={16} />
+              <span>{copy().chapters}</span>
+            </div>
+
+            <div class="chapter-list">
+              {#each chapterNavItems as item}
+                <button
+                  class:active={activePage?.chapterId === item.chapterId}
+                  class="chapter-link"
+                  type="button"
+                  onclick={() => goToPage(item.pageIndex)}
+                >
+                  <span>{item.title}</span>
+                  <small>{copy().pageAbbr} {item.pageNumber}</small>
+                </button>
+              {/each}
+            </div>
+          </nav>
+        {/if}
+
+        <div class="spine-actions">
+          <button class="ghost-button" type="button" onclick={() => void loadReader({ background: true })}>
+            <RefreshCcw size={16} class={refreshing ? 'spin' : undefined} />
+            {copy().refreshDraft}
+          </button>
+        </div>
 
         <div class="meta-block">
           <div>
-            <span class="meta-label">Freshness</span>
-            <strong>{freshnessLabel}</strong>
-            <span>{formatAbsoluteTime(summary.last_updated_at) ?? 'No timestamp available'}</span>
+            <span class="meta-label">{copy().position}</span>
+            <strong>{pagePositionLabel}</strong>
+            <span>{activeChapterTitle}</span>
           </div>
           <div>
-            <span class="meta-label">Revision</span>
-            <strong>{revisionLabel}</strong>
-            <span>{chapterLabel}</span>
+            <span class="meta-label">{copy().pageSettings}</span>
+            <strong>{copy().wordsPerPage}</strong>
+            <span>{copy().bookTextSize}</span>
           </div>
-        </div>
-
-        <div class="status-stack">
-          <div class={`status-pill ${renderBadge.tone}`}>
-            <Sparkles size={16} />
-            <div>
-              <strong>{renderBadge.label}</strong>
-              <span>{renderBadge.detail}</span>
-            </div>
-          </div>
-
-          <div class={`status-pill ${jobBadge.tone}`}>
-            <Clock3 size={16} />
-            <div>
-              <strong>{jobBadge.label}</strong>
-              <span>{jobBadge.detail}</span>
-            </div>
-          </div>
-        </div>
-
-        <dl class="facts">
-          <div>
-            <dt>Book state</dt>
-            <dd>{titleCase(summary.status)}</dd>
-          </div>
-          <div>
-            <dt>Render state</dt>
-            <dd>{titleCase(revision?.render_status ?? summary.render_status)}</dd>
-          </div>
-          <div>
-            <dt>Job state</dt>
-            <dd>{titleCase(job?.status ?? 'idle')}</dd>
-          </div>
-          <div>
-            <dt>Job finished</dt>
-            <dd>{formatAbsoluteTime(job?.finished_at) ?? 'Not finished yet'}</dd>
-          </div>
-        </dl>
-
-        <div class="spine-actions">
-            <button class="ghost-button" type="button" onclick={() => void loadReader({ background: true })}>
-              <RefreshCcw size={16} class={refreshing ? 'spin' : undefined} />
-              Refresh draft
-            </button>
         </div>
       </aside>
 
       <section class="book">
-        <header class="front-matter">
-          <p class="front-kicker">Current view</p>
-          <h2>{summary.title}</h2>
-          <p class="front-copy">
-            {#if viewState === 'empty'}
-              The manuscript shell is ready, but no rendered chapter pages exist yet.
-            {:else if viewState === 'render_failed'}
-              The newest revision exists, but the reader surface could not be built for it.
-            {:else}
-              A quiet reading surface for the latest draft, loaded a chapter at a time.
-            {/if}
-          </p>
-        </header>
-
         {#if surfaceNotice}
           <div class={`notice ${surfaceNotice.tone}`}>
             <p>{surfaceNotice.title}</p>
@@ -495,7 +837,7 @@
           <section class="empty-state">
             <AlertTriangle size={18} />
             <div>
-              <p>Render output unavailable</p>
+              <p>{copy().renderOutputUnavailable}</p>
               <span>{renderFailureMessage}</span>
             </div>
           </section>
@@ -503,21 +845,75 @@
           <section class="empty-state">
             <BookOpenText size={18} />
             <div>
-              <p>No chapters yet</p>
-              <span>Once the first revision is rendered, the reading view will appear here.</span>
+              <p>{copy().noChaptersYet}</p>
+              <span>{copy().emptyReaderBody}</span>
             </div>
           </section>
         {:else}
-          <div class="chapters">
-            {#each chapters as chapter}
-              <article class="chapter">
-                <header class="chapter-header">
-                  <p>Chapter {chapter.chapter_index + 1}</p>
-                  <h3>{chapter.title}</h3>
-                </header>
-                <div class="chapter-content">{@html chapter.html}</div>
-              </article>
-            {/each}
+          <div class="book-stage" aria-live="polite">
+            {#if loadingSequence}
+              <div class="sequence-loader">
+                <LoaderCircle size={16} class="spin" />
+                <span>{copy().settingChapterPages}</span>
+              </div>
+            {/if}
+
+            <article class="book-page-shell">
+              <div class="page leaf">
+                {#if activePage}
+                  <header class="page-header">
+                    <span>{summary.title}</span>
+                    <span>{pagePositionLabel}</span>
+                  </header>
+
+                  <div class="page-content" bind:this={pageContentElement}>
+                    <div class="chapter-content">{@html activePage.html}</div>
+                  </div>
+
+                  <footer class="page-footer">{activePage.pageNumber}</footer>
+                {/if}
+              </div>
+            </article>
+
+            {#if selectionToolbarVisible}
+              <div
+                class="selection-toolbar"
+                style={`left: ${selectionToolbarX}px; top: ${selectionToolbarY}px;`}
+                onmousedown={(event) => event.preventDefault()}
+                role="toolbar"
+                tabindex="-1"
+                aria-label={copy().selectionToolbarLabel}
+              >
+                <button type="button" onclick={copySelectionText}>
+                  <Copy size={14} />
+                  {copy().copyText}
+                </button>
+                <button type="button" onclick={copySelectionReference}>
+                  <Link2 size={14} />
+                  {copy().copyReference}
+                </button>
+                {#if selectionClipboardStatus}
+                  <span>{selectionClipboardStatus}</span>
+                {/if}
+              </div>
+            {/if}
+          </div>
+
+          <div class="page-controls">
+            <button class="ghost-button" type="button" onclick={previousPage} disabled={activePageIndex === 0}>
+              <ChevronLeft size={16} />
+              {copy().previousPage}
+            </button>
+            <span>{pagePositionLabel}</span>
+            <button
+              class="ghost-button"
+              type="button"
+              onclick={nextPage}
+              disabled={activePageIndex >= Math.max(bookPages.length - 1, 0)}
+            >
+              {copy().nextPage}
+              <ChevronRight size={16} />
+            </button>
           </div>
 
           {#if nextCursor}
@@ -525,9 +921,9 @@
               <button class="continue-button" type="button" onclick={loadMore} disabled={loadingMore}>
                 {#if loadingMore}
                   <LoaderCircle size={16} class="spin" />
-                  Loading the next section
+                  {copy().loadingPages}
                 {:else}
-                  Load the next chapter
+                  {copy().loadRemainingPages}
                 {/if}
               </button>
             </div>
@@ -535,17 +931,19 @@
         {/if}
       </section>
     </section>
-  </main>
+</main>
 {/if}
 
 <style>
+  :global(html),
   :global(body) {
+    height: 100%;
     margin: 0;
-    color: #221814;
+    overflow: hidden;
+    overscroll-behavior: none;
+    color: #171a17;
     font-family: Baskerville, 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', serif;
-    background:
-      radial-gradient(circle at top left, rgba(159, 108, 54, 0.14), transparent 26rem),
-      linear-gradient(180deg, #efe4d2 0%, #e3d4bf 48%, #d8c6af 100%);
+    background: #e7ebe4;
   }
 
   :global(button) {
@@ -553,69 +951,103 @@
   }
 
   :global(.chapter-content p) {
-    margin: 0 0 1.25rem;
+    margin: 0 0 0.95rem;
+    text-align: justify;
+    text-wrap: pretty;
   }
 
   :global(.chapter-content h1),
   :global(.chapter-content h2),
   :global(.chapter-content h3),
   :global(.chapter-content h4) {
-    margin: 2rem 0 1rem;
-    line-height: 1.15;
+    margin: 1.35rem 0 0.75rem;
+    line-height: 1.18;
+    break-after: avoid;
   }
 
   :global(.chapter-content blockquote) {
-    margin: 1.75rem 0;
+    margin: 1.1rem 0;
     padding-left: 1rem;
-    border-left: 3px solid rgba(139, 95, 49, 0.28);
-    color: #59463a;
+    border-left: 3px solid #7e1f32;
+    color: #3f4943;
+  }
+
+  :global(.chapter-content img) {
+    display: block;
+    width: min(100%, 34rem);
+    max-height: 58vh;
+    height: auto;
+    margin: 1.2rem auto;
+    object-fit: contain;
+    border-radius: 8px;
+  }
+
+  :global(.chapter-content p:has(img)) {
+    margin: 1.2rem 0;
+    text-align: center;
   }
 
   .reader-shell {
-    min-height: 100vh;
-    padding: 1.5rem;
+    box-sizing: border-box;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    padding: 1.25rem;
+  }
+
+  .mobile-reader-bar,
+  .menu-scrim,
+  .spine-close {
+    display: none;
   }
 
   .frame {
-    max-width: 90rem;
+    height: calc(100vh - 2.5rem);
+    height: calc(100dvh - 2.5rem);
+    min-height: 0;
+    max-width: 96rem;
     margin: 0 auto;
     display: grid;
-    grid-template-columns: minmax(18rem, 23rem) minmax(0, 1fr);
-    gap: 1.5rem;
+    grid-template-columns: minmax(17rem, 21rem) minmax(0, 1fr);
+    gap: 1.25rem;
     align-items: start;
   }
 
   .spine,
-  .book,
   .state-card {
-    border: 1px solid rgba(67, 43, 25, 0.12);
-    box-shadow: 0 1.4rem 3.4rem rgba(56, 35, 19, 0.1);
+    border: 1px solid #b8c0b6;
+    box-shadow: 0 1rem 2.4rem rgba(23, 26, 23, 0.12);
   }
 
   .spine {
     position: sticky;
-    top: 1.5rem;
-    padding: 1.75rem;
-    background:
-      linear-gradient(180deg, rgba(255, 249, 241, 0.94), rgba(246, 235, 217, 0.95)),
-      #fbf6ee;
-    border-radius: 1.4rem;
+    top: 1.25rem;
+    max-height: calc(100vh - 2.5rem);
+    overflow: auto;
+    padding: 1rem;
+    background: #ffffff;
+    border-radius: 8px;
+  }
+
+  .spine-title-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
   }
 
   .eyebrow,
   .meta-label,
-  .facts dt,
-  .chapter-header p,
-  .front-kicker {
+  .nav-heading,
+  .page-header,
+  .page-footer {
     text-transform: uppercase;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.08em;
     font-size: 0.7rem;
-    color: #90663d;
+    color: #55625a;
   }
 
   h1,
-  h2,
-  h3,
   .state-title {
     font-family: 'Iowan Old Style', Baskerville, 'Palatino Linotype', serif;
     font-weight: 500;
@@ -623,102 +1055,96 @@
 
   h1 {
     margin: 0;
-    font-size: clamp(2.3rem, 4vw, 3.5rem);
-    line-height: 0.94;
+    font-size: 2rem;
+    line-height: 1;
     text-wrap: balance;
   }
 
-  .subtitle,
-    .front-copy,
-    .state-copy,
+  .state-copy,
   .notice span,
-  .empty-viewState span,
-  .status-pill span {
-    color: #654f42;
-    line-height: 1.65;
-  }
-
-  .subtitle {
-    margin: 1rem 0 1.75rem;
-    font-size: 1.02rem;
+  .empty-state span,
+  .meta-block span {
+    color: #55625a;
+    line-height: 1.55;
   }
 
   .meta-block {
     display: grid;
-    gap: 1rem;
-    padding: 1rem 0 1.25rem;
-    border-top: 1px solid rgba(67, 43, 25, 0.08);
-    border-bottom: 1px solid rgba(67, 43, 25, 0.08);
+    gap: 0.8rem;
+    margin-top: 1rem;
+    padding: 0.85rem 0;
+    border-top: 1px solid #d6ddd4;
+    border-bottom: 1px solid #d6ddd4;
   }
 
-  .meta-block div,
-  .status-pill div {
+  .meta-block div {
     display: grid;
     gap: 0.2rem;
   }
 
   .meta-block strong,
-  .status-pill strong,
-  .facts dd,
-  .empty-viewState p,
+  .empty-state p,
   .notice p {
     font-weight: 600;
   }
 
-  .meta-block span:last-child,
-  .facts dd,
-  .front-kicker,
-  .chapter-header p {
+  .meta-block span:last-child {
     display: block;
     margin-top: 0.22rem;
   }
 
-  .status-stack {
-    display: grid;
-    gap: 0.9rem;
-    margin: 1.25rem 0;
+  .chapter-nav {
+    margin-top: 1rem;
   }
 
-  .status-pill {
+  .nav-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .chapter-list {
     display: grid;
-    grid-template-columns: auto 1fr;
+    gap: 0.35rem;
+    max-height: 42vh;
+    overflow: auto;
+    padding-right: 0.2rem;
+  }
+
+  .chapter-link {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.75rem;
-    align-items: start;
-    padding: 0.95rem 1rem;
-    border-radius: 1rem;
-    border: 1px solid rgba(67, 43, 25, 0.08);
-    background: rgba(255, 252, 247, 0.84);
+    align-items: center;
+    padding: 0.55rem 0.65rem;
+    text-align: left;
+    color: #171a17;
+    background: #f6f8f4;
+    border: 1px solid #d6ddd4;
+    border-radius: 8px;
+    cursor: pointer;
   }
 
-  .status-pill.neutral {
-    background: rgba(255, 252, 247, 0.84);
+  .chapter-link span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .status-pill.warm {
-    background: rgba(248, 234, 201, 0.75);
+  .chapter-link small {
+    color: #55625a;
   }
 
-  .status-pill.success {
-    background: rgba(224, 241, 228, 0.85);
-  }
-
-  .status-pill.danger {
-    background: rgba(247, 224, 216, 0.9);
-  }
-
-  .facts {
-    margin: 0;
-    display: grid;
-    gap: 0.9rem;
-  }
-
-  .facts dd {
-    margin: 0.25rem 0 0;
-    color: #2f221b;
+  .chapter-link.active,
+  .chapter-link:hover {
+    border-color: #7e1f32;
+    background: #ffffff;
   }
 
   .spine-actions {
-    margin-top: 1.4rem;
+    margin-top: 1rem;
   }
 
   .ghost-button,
@@ -727,7 +1153,7 @@
     align-items: center;
     justify-content: center;
     gap: 0.55rem;
-    border-radius: 999px;
+    border-radius: 8px;
     cursor: pointer;
     transition:
       transform 140ms ease,
@@ -736,17 +1162,17 @@
   }
 
   .ghost-button {
-    padding: 0.8rem 1rem;
-    color: #2f221b;
-    background: rgba(255, 252, 247, 0.7);
-    border: 1px solid rgba(67, 43, 25, 0.12);
+    padding: 0.68rem 0.85rem;
+    color: #171a17;
+    background: #ffffff;
+    border: 1px solid #b8c0b6;
   }
 
   .continue-button {
-    padding: 0.95rem 1.3rem;
-    color: #fef9f1;
-    background: #4d2f1d;
-    border: 1px solid #4d2f1d;
+    padding: 0.75rem 1rem;
+    color: #ffffff;
+    background: #2c4735;
+    border: 1px solid #2c4735;
   }
 
   .ghost-button:hover,
@@ -762,31 +1188,20 @@
   }
 
   .book {
-    min-height: calc(100vh - 3rem);
-    padding: clamp(1.5rem, 4vw, 3rem);
-    background:
-      linear-gradient(180deg, rgba(255, 252, 247, 0.93), rgba(252, 247, 239, 0.96)),
-      #fffaf2;
-    border-radius: 1.8rem;
-  }
-
-  .front-matter {
-    padding-bottom: 2rem;
-    margin-bottom: 2rem;
-    border-bottom: 1px solid rgba(67, 43, 25, 0.12);
-  }
-
-  .front-matter h2 {
-    margin: 0.4rem 0 0.8rem;
-    font-size: clamp(2rem, 4vw, 3rem);
-    line-height: 0.98;
-    text-wrap: balance;
-  }
-
-  .front-copy {
-    max-width: 42rem;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
     margin: 0;
-    font-size: 1.04rem;
+    background: #2c4735;
+    border: 1px solid #263c2e;
+    border-radius: 8px;
+    box-shadow:
+      inset 0 0 0 0.35rem #3f5f49,
+      0 1.4rem 2.8rem rgba(23, 26, 23, 0.22);
+    padding: 1.25rem;
   }
 
   .notice,
@@ -794,27 +1209,27 @@
     display: grid;
     grid-template-columns: 1fr;
     gap: 0.35rem;
-    padding: 1rem 1.1rem;
-    border-radius: 1rem;
-    border: 1px solid rgba(67, 43, 25, 0.08);
-    margin-bottom: 1.6rem;
+    padding: 0.85rem 1rem;
+    border-radius: 8px;
+    border: 1px solid #d6ddd4;
+    margin-bottom: 1rem;
   }
 
   .notice.neutral,
   .empty-state {
-    background: rgba(243, 234, 221, 0.56);
+    background: #f6f8f4;
   }
 
   .notice.warm {
-    background: rgba(248, 234, 201, 0.64);
+    background: #f4efd8;
   }
 
   .notice.success {
-    background: rgba(224, 241, 228, 0.72);
+    background: #e3f0e5;
   }
 
   .notice.danger {
-    background: rgba(247, 224, 216, 0.82);
+    background: #f5e4e4;
   }
 
   .empty-state {
@@ -828,51 +1243,150 @@
     margin: 0;
   }
 
-  .chapters {
-    display: grid;
-    gap: 2.5rem;
-  }
-
-  .chapter {
+  .book-stage {
     position: relative;
-    max-width: 46rem;
-    margin: 0 auto;
-    padding: clamp(1.4rem, 4vw, 2.6rem);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(251, 246, 238, 0.92)),
-      #fffdf8;
-    border: 1px solid rgba(67, 43, 25, 0.1);
-    border-radius: 1.4rem;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
   }
 
-  .chapter::before {
-    content: '';
+  .sequence-loader {
     position: absolute;
-    inset: 0.8rem auto 0.8rem 0.8rem;
-    width: 0.18rem;
-    border-radius: 999px;
-    background: linear-gradient(180deg, rgba(139, 95, 49, 0.45), rgba(139, 95, 49, 0));
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.6rem;
+    color: #ffffff;
+    background: #7e1f32;
+    border-radius: 8px;
   }
 
-  .chapter-header {
-    margin-bottom: 1.4rem;
-    padding-left: 0.9rem;
+  .selection-toolbar {
+    position: fixed;
+    z-index: 20;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    max-width: min(30rem, calc(100vw - 1rem));
+    padding: 0.35rem;
+    color: #ffffff;
+    background: #171a17;
+    border: 1px solid #3f4943;
+    border-radius: 8px;
+    box-shadow: 0 0.75rem 1.5rem rgba(23, 26, 23, 0.24);
+    transform: translate(-50%, -100%);
   }
 
-  .chapter-header h3 {
-    margin: 0.3rem 0 0;
-    font-size: clamp(1.7rem, 3vw, 2.5rem);
-    line-height: 1.02;
+  .selection-toolbar button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 2rem;
+    padding: 0.35rem 0.55rem;
+    color: #171a17;
+    background: #ffffff;
+    border: 1px solid #d6ddd4;
+    border-radius: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .selection-toolbar span {
+    padding: 0 0.45rem;
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
+
+  .book-page-shell {
+    position: relative;
+    width: min(46rem, 100%);
+    min-height: 0;
+    height: 100%;
+    margin: 0 auto;
+    isolation: isolate;
+  }
+
+  .leaf {
+    min-width: 0;
+  }
+
+  .page {
+    position: relative;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+    padding: 2.25rem 2.5rem 1.75rem;
+    color: #171a17;
+    background: #fbfbf7;
+    border: 1px solid #d6ddd4;
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1px #ffffff;
+  }
+
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-bottom: 0.8rem;
+    border-bottom: 1px solid #d6ddd4;
+  }
+
+  .page-header span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .page-content {
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding-top: 1.35rem;
+    scrollbar-gutter: stable;
+  }
+
+  :global(.page-content h1),
+  :global(.page-content h2) {
+    margin: 0 0 1rem;
+    font-size: 1.75rem;
+    line-height: 1.08;
+    text-wrap: balance;
   }
 
   .chapter-content {
-    padding-left: 0.9rem;
-    font-size: clamp(1.06rem, 1.6vw, 1.16rem);
-    line-height: 1.88;
+    font-size: var(--book-font-size);
+    line-height: 1.58;
+  }
+
+  .page-footer {
+    display: flex;
+    justify-content: center;
+    padding-top: 0.8rem;
+    border-top: 1px solid #d6ddd4;
+  }
+
+  .page-controls {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1rem;
+    color: #ffffff;
+  }
+
+  .page-controls span {
+    text-align: center;
   }
 
   .continuation {
+    flex: 0 0 auto;
     display: flex;
     justify-content: center;
     margin-top: 2rem;
@@ -889,8 +1403,8 @@
     width: min(30rem, 100%);
     padding: 2rem;
     text-align: center;
-    border-radius: 1.4rem;
-    background: rgba(255, 250, 243, 0.92);
+    border-radius: 8px;
+    background: #ffffff;
   }
 
   .state-title {
@@ -912,25 +1426,170 @@
 
   @media (max-width: 960px) {
     .reader-shell {
-      padding: 1rem;
+      padding: 0.75rem;
+      padding-top: 4.75rem;
     }
 
     .frame {
-      grid-template-columns: 1fr;
+      height: calc(100vh - 5.5rem);
+      height: calc(100dvh - 5.5rem);
+      min-height: 0;
+      display: block;
     }
 
     .spine {
-      position: static;
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 30;
+      width: min(22rem, calc(100vw - 2.25rem));
+      max-height: none;
+      border-radius: 0 8px 8px 0;
+      box-shadow: 0 1.5rem 3rem rgba(23, 26, 23, 0.28);
+      transform: translateX(calc(-100% - 1rem));
+      transition: transform 180ms ease;
+      overscroll-behavior: contain;
+    }
+
+    .spine.open {
+      transform: translateX(0);
+    }
+
+    .spine-title-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+    }
+
+    .spine-close {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.5rem;
+      height: 2.5rem;
+      color: #171a17;
+      background: #f6f8f4;
+      border: 1px solid #d6ddd4;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .spine h1 {
+      font-size: 1.7rem;
+    }
+
+    .chapter-list {
+      max-height: 48vh;
+    }
+
+    .mobile-reader-bar {
+      position: fixed;
+      top: 0.75rem;
+      left: 0.75rem;
+      right: 0.75rem;
+      z-index: 15;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 0.75rem;
+      min-height: 3.25rem;
+      padding: 0.45rem 0.65rem;
+      color: #171a17;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid #b8c0b6;
+      border-radius: 8px;
+      box-shadow: 0 0.85rem 1.8rem rgba(23, 26, 23, 0.16);
+      backdrop-filter: blur(10px);
+    }
+
+    .mobile-reader-bar div {
+      display: grid;
+      gap: 0.12rem;
+      min-width: 0;
+    }
+
+    .mobile-reader-bar span {
+      overflow: hidden;
+      color: #55625a;
+      font-size: 0.82rem;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mobile-reader-bar strong {
+      overflow: hidden;
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .menu-trigger {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.35rem;
+      height: 2.35rem;
+      color: #ffffff;
+      background: #2c4735;
+      border: 1px solid #2c4735;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .menu-scrim {
+      position: fixed;
+      inset: 0;
+      z-index: 25;
+      display: block;
+      padding: 0;
+      background: rgba(23, 26, 23, 0.42);
+      border: 0;
+      cursor: pointer;
     }
 
     .book {
+      height: 100%;
+      min-height: 0;
+      padding: 0.65rem;
+    }
+
+    .book-page-shell {
+      height: 100%;
       min-height: auto;
+    }
+
+    .page {
+      min-height: 0;
+      height: 100%;
+      max-height: none;
+      padding: 1.4rem 1.25rem 1rem;
+      border-radius: 8px;
+      border: 1px solid #d6ddd4;
+    }
+
+    .page-controls {
+      flex-wrap: wrap;
+    }
+
+    .page-controls span {
+      order: -1;
+      width: 100%;
+    }
+
+    .selection-toolbar {
+      flex-wrap: wrap;
+      justify-content: center;
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .spin {
       animation: none;
+    }
+
+    .spine {
+      transition: none;
     }
 
     .ghost-button,

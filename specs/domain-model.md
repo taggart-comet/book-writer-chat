@@ -73,18 +73,6 @@ Suggested fields:
 - `created_at`
 - `render_status`
 
-### RenderSnapshot
-
-Represents the frontend-consumable output for a given revision.
-
-Suggested fields:
-
-- `render_snapshot_id`
-- `revision_id`
-- `format`
-- `storage_location`
-- `created_at`
-
 ### RepositoryBinding
 
 Represents an optional external source-control binding for a book.
@@ -108,7 +96,6 @@ Suggested fields:
 - one `Book` can have many `AuthoringSession` records over time
 - one `Book` can have many `WritingJob` records
 - one `WritingJob` may produce zero or one `Revision`
-- one `Revision` may produce one or more `RenderSnapshot` artifacts
 - one `Book` may have zero or one active `RepositoryBinding`
 
 ## State Considerations

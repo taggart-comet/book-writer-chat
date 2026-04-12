@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement the core backend data model and workspace provisioning logic so the system can represent conversations, books, jobs, revisions, and render snapshots in a durable way.
+Implement the core backend data model and workspace provisioning logic so the system can represent conversations, books, jobs, and revisions in a durable way.
 
 ## Sequencing Note
 
@@ -31,7 +31,7 @@ This action should implement:
 - An explicit setup command provisions exactly one book workspace for a conversation.
 - A second setup attempt for the same conversation does not create a duplicate book.
 - A newly provisioned workspace contains `book.yaml`, `style.yaml`, and the expected content and asset directories.
-- Book, session, job, revision, render snapshot, and repository binding records can be stored and queried through the backend.
+- Book, session, job, revision, and repository binding records can be stored and queried through the backend.
 - Book workspace paths remain isolated per conversation.
 
 ## Verification

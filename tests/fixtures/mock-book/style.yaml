@@ -1,0 +1,12 @@
+theme: classic-readable
+typography:
+  body: book-serif
+  headings: editorial-serif
+  scale: medium
+layout:
+  page_width: readable
+  chapter_opening: spacious
+images:
+  default_alignment: center
+  default_width: medium
+  captions: enabled

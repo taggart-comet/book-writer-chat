@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     app::metrics::Metrics, authoring::executor::DynExecutor, core::config::Config,
-    storage::repository::Repository,
+    messaging::media::DynMediaDownloader, storage::repository::Repository,
 };
 
 #[derive(Clone)]
@@ -12,6 +12,7 @@ pub struct AppState {
     pub config: Config,
     pub repository: Repository,
     pub executor: DynExecutor,
+    pub media_downloader: DynMediaDownloader,
     pub metrics: Metrics,
     pub conversation_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }

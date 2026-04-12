@@ -1,20 +1,22 @@
-use std::{
-    fmt::Write as _,
-    path::{Path, PathBuf},
-};
+use std::{fmt::Write as _, path::Path};
 
 use anyhow::{Result, anyhow};
-use pulldown_cmark::{Options, Parser, html};
+use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, html};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
-use crate::storage::workspace::{read_manifest, read_style};
+use crate::storage::{
+    media_assets::ensure_workspace_asset_path,
+    workspace::{read_manifest, read_style},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderedChapter {
     pub id: String,
     pub kind: String,
     pub title: String,
+    #[serde(default)]
+    pub source_file: String,
     pub html: String,
 }
 
@@ -28,30 +30,6 @@ pub struct RenderedBook {
     pub content_hash: String,
 }
 
-pub fn render_snapshot_path(data_dir: &Path, revision_id: &str) -> PathBuf {
-    data_dir
-        .join("render-snapshots")
-        .join(format!("{revision_id}.json"))
-}
-
-pub fn write_render_snapshot(
-    data_dir: &Path,
-    revision_id: &str,
-    rendered: &RenderedBook,
-) -> Result<String> {
-    let path = render_snapshot_path(data_dir, revision_id);
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow!("render snapshot path has no parent"))?;
-    std::fs::create_dir_all(parent)?;
-    std::fs::write(&path, serde_json::to_vec_pretty(rendered)?)?;
-    Ok(path.display().to_string())
-}
-
-pub fn read_render_snapshot(storage_location: &str) -> Result<RenderedBook> {
-    Ok(serde_json::from_slice(&std::fs::read(storage_location)?)?)
-}
-
 pub fn render_workspace(workspace: &Path) -> Result<RenderedBook> {
     let manifest = read_manifest(workspace)?;
     let style = read_style(workspace)?;
@@ -63,18 +41,19 @@ pub fn render_workspace(workspace: &Path) -> Result<RenderedBook> {
     let mut full_html = String::new();
     for entry in &manifest.content {
         let markdown = std::fs::read_to_string(workspace.join(&entry.file))?;
-        let html = markdown_to_html(&markdown);
+        let html = markdown_to_html(workspace, &markdown, &entry.file)?;
         let title = first_heading(&markdown).unwrap_or_else(|| entry.id.clone());
         let chapter = RenderedChapter {
             id: entry.id.clone(),
             kind: entry.kind.clone(),
             title: title.clone(),
+            source_file: entry.file.clone(),
             html: html.clone(),
         };
         let _ = write!(
             full_html,
-            "<section data-kind=\"{}\" data-id=\"{}\"><h2>{}</h2>{}</section>",
-            chapter.kind, chapter.id, chapter.title, chapter.html
+            "<section data-kind=\"{}\" data-id=\"{}\">{}</section>",
+            chapter.kind, chapter.id, chapter.html
         );
         chapters.push(chapter);
     }
@@ -89,13 +68,100 @@ pub fn render_workspace(workspace: &Path) -> Result<RenderedBook> {
     })
 }
 
-fn markdown_to_html(markdown: &str) -> String {
+fn markdown_to_html(workspace: &Path, markdown: &str, source_file: &str) -> Result<String> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     let parser = Parser::new_ext(markdown, options);
+    let line_index = SourceLineIndex::new(markdown);
+    let mut events = Vec::new();
+    for (event, range) in parser.into_offset_iter() {
+        match event {
+            Event::Start(tag) => {
+                if let Tag::Image { dest_url, .. } = &tag {
+                    validate_image_reference(workspace, dest_url.as_ref())?;
+                }
+                events.push(Event::Start(tag.into_static()));
+            }
+            Event::Text(text) => {
+                let start = line_index.position(range.start);
+                let end = line_index.position(range.end);
+                events.extend([
+                    Event::Html(CowStr::from(format!(
+                        "<span data-source-file=\"{}\" data-source-start-line=\"{}\" data-source-start-char=\"{}\" data-source-end-line=\"{}\" data-source-end-char=\"{}\">",
+                        escape_html_attr(source_file),
+                        start.line,
+                        start.character,
+                        end.line,
+                        end.character
+                    ))),
+                    Event::Text(text.into_static()),
+                    Event::Html(CowStr::from("</span>")),
+                ]);
+            }
+            _ => events.push(event.into_static()),
+        }
+    }
     let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
-    html_output
+    html::push_html(&mut html_output, events.into_iter());
+    Ok(html_output)
+}
+
+fn validate_image_reference(workspace: &Path, dest_url: &str) -> Result<()> {
+    if dest_url.starts_with("assets/images/") {
+        ensure_workspace_asset_path(dest_url)?;
+        let image_path = workspace.join(dest_url);
+        if !image_path.exists() {
+            return Err(anyhow!("image reference `{dest_url}` does not exist"));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SourcePosition {
+    line: usize,
+    character: usize,
+}
+
+struct SourceLineIndex<'a> {
+    source: &'a str,
+    line_starts: Vec<usize>,
+}
+
+impl<'a> SourceLineIndex<'a> {
+    fn new(source: &'a str) -> Self {
+        let mut line_starts = vec![0];
+        for (index, byte) in source.bytes().enumerate() {
+            if byte == b'\n' {
+                line_starts.push(index + 1);
+            }
+        }
+        Self {
+            source,
+            line_starts,
+        }
+    }
+
+    fn position(&self, byte_offset: usize) -> SourcePosition {
+        let line_index = self
+            .line_starts
+            .partition_point(|line_start| *line_start <= byte_offset)
+            .saturating_sub(1);
+        let line_start = self.line_starts[line_index];
+        let character = self.source[line_start..byte_offset].chars().count() + 1;
+        SourcePosition {
+            line: line_index + 1,
+            character,
+        }
+    }
+}
+
+fn escape_html_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn first_heading(markdown: &str) -> Option<String> {
@@ -130,5 +196,11 @@ mod tests {
         let two = render_workspace(&workspace).unwrap();
         assert_eq!(one.full_html, two.full_html);
         assert_eq!(one.content_hash, two.content_hash);
+        assert_eq!(
+            one.chapters[0].source_file,
+            "content/frontmatter/001-title-page.md"
+        );
+        assert!(one.full_html.contains("data-source-file=\"content/"));
+        assert!(!one.full_html.contains("<h2>Opening</h2>"));
     }
 }

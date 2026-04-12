@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tracing::info;
 
 use crate::{
@@ -9,12 +9,17 @@ use crate::{
         executor::{ExecutionOutcome, ExecutionRequest},
         prompt::build_prompt,
     },
-    core::models::{CommandKind, JobStatus, NormalizedMessage, Notification, RevisionRenderStatus},
+    core::models::{
+        BookLanguage, CommandKind, JobStatus, NormalizedMessage, Notification, RevisionRenderStatus,
+    },
     messaging::handlers::MessageApiResponse,
-    reader::links::issue_token,
+    reader::links::{READER_TOKEN_TTL_HOURS, issue_token, reader_url},
     storage::{
-        render_store::{RenderedBook, render_workspace, write_render_snapshot},
-        workspace::{diff_workspace, ensure_workspace, snapshot_workspace, workspace_dir},
+        media_assets::{SavedImageAttachment, save_image_attachment},
+        render_store::render_workspace,
+        workspace::{
+            diff_workspace, ensure_workspace, read_book_language, snapshot_workspace, workspace_dir,
+        },
     },
 };
 
@@ -45,6 +50,7 @@ pub async fn authoring_flow(
     let _conversation_guard = conversation_lock.lock().await;
 
     let workspace = ensure_workspace(&state.config.books_root, &conversation_id, &book)?;
+    let language = read_book_language(&workspace);
     let expected_workspace = workspace_dir(&state.config.books_root, &conversation_id);
     if workspace != expected_workspace || PathBuf::from(&book.workspace_path) != expected_workspace
     {
@@ -60,11 +66,29 @@ pub async fn authoring_flow(
             }),
         });
     }
+    let before = snapshot_workspace(&workspace)?;
+    let saved_images = match save_message_images(&state, &workspace, &message).await {
+        Ok(saved_images) => saved_images,
+        Err(error) => {
+            return Ok(MessageApiResponse {
+                handled: true,
+                ignored: false,
+                notification: Some(Notification {
+                    provider: message.provider,
+                    provider_chat_id: message.provider_chat_id,
+                    message: format!(
+                        "The image attachment could not be saved for the book: {error}"
+                    ),
+                    reader_url: None,
+                }),
+            });
+        }
+    };
     let session = state
         .repository
         .open_session(&conversation_id, &book.book_id, message.timestamp)
         .await?;
-    let prompt = build_prompt(&workspace, &book, &instruction, &message)?;
+    let prompt = build_prompt(&workspace, &book, &instruction, &message, &saved_images)?;
     let job = state
         .repository
         .create_job(
@@ -81,7 +105,7 @@ pub async fn authoring_flow(
         .update_job_status(
             &job.job_id,
             JobStatus::Accepted,
-            Some("Job accepted".to_string()),
+            Some(localized_text(language).job_accepted.to_string()),
             None,
             None,
         )
@@ -91,13 +115,12 @@ pub async fn authoring_flow(
         .update_job_status(
             &job.job_id,
             JobStatus::Running,
-            Some("Job running".to_string()),
+            Some(localized_text(language).job_running.to_string()),
             None,
             None,
         )
         .await?;
 
-    let before = snapshot_workspace(&workspace)?;
     info!(job_id = %job.job_id, book_id = %book.book_id, "starting authoring job");
     let outcome = state
         .executor
@@ -118,7 +141,7 @@ pub async fn authoring_flow(
                 .update_job_status(
                     &job.job_id,
                     JobStatus::Failed,
-                    Some("The writing job failed before it could start.".to_string()),
+                    Some(localized_text(language).job_failed_to_start.to_string()),
                     Some(changed_files),
                     Some(format!("launcher failure: {error:#}")),
                 )
@@ -129,7 +152,7 @@ pub async fn authoring_flow(
                 notification: Some(Notification {
                     provider: message.provider,
                     provider_chat_id: message.provider_chat_id,
-                    message: "The writing job could not be started. Please try again.".to_string(),
+                    message: localized_text(language).job_could_not_start.to_string(),
                     reader_url: None,
                 }),
             });
@@ -142,10 +165,41 @@ pub async fn authoring_flow(
         workspace,
         job.job_id,
         message,
+        language,
         outcome,
         changed_files,
     )
     .await
+}
+
+async fn save_message_images(
+    state: &AppState,
+    workspace: &Path,
+    message: &NormalizedMessage,
+) -> Result<Vec<SavedImageAttachment>> {
+    let mut saved_images = Vec::new();
+    for (index, attachment) in message.attachments.iter().enumerate() {
+        let media = state
+            .media_downloader
+            .download(&message.provider, attachment)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to download image attachment {} from {:?}",
+                    index + 1,
+                    message.provider
+                )
+            })?;
+        saved_images.push(save_image_attachment(
+            workspace,
+            &message.provider,
+            &message.message_id,
+            index,
+            attachment,
+            media,
+        )?);
+    }
+    Ok(saved_images)
 }
 
 pub async fn finalize_authoring(
@@ -154,6 +208,7 @@ pub async fn finalize_authoring(
     workspace: PathBuf,
     job_id: String,
     message: NormalizedMessage,
+    language: BookLanguage,
     outcome: ExecutionOutcome,
     changed_files: Vec<String>,
 ) -> Result<MessageApiResponse> {
@@ -164,7 +219,7 @@ pub async fn finalize_authoring(
             .update_job_status(
                 &job_id,
                 JobStatus::TimedOut,
-                Some("The writing job timed out.".to_string()),
+                Some(localized_text(language).job_timed_out.to_string()),
                 Some(changed_files),
                 Some(outcome.stderr),
             )
@@ -175,7 +230,9 @@ pub async fn finalize_authoring(
             notification: Some(Notification {
                 provider: message.provider,
                 provider_chat_id: message.provider_chat_id,
-                message: "The writing job timed out before finishing.".to_string(),
+                message: localized_text(language)
+                    .job_timed_out_before_finish
+                    .to_string(),
                 reader_url: None,
             }),
         });
@@ -187,7 +244,7 @@ pub async fn finalize_authoring(
             .update_job_status(
                 &job_id,
                 JobStatus::Failed,
-                Some("The writing job failed.".to_string()),
+                Some(localized_text(language).job_failed.to_string()),
                 Some(changed_files),
                 Some(outcome.stderr),
             )
@@ -198,45 +255,46 @@ pub async fn finalize_authoring(
             notification: Some(Notification {
                 provider: message.provider,
                 provider_chat_id: message.provider_chat_id,
-                message: "The writing job failed. Please try again.".to_string(),
+                message: localized_text(language).job_failed_try_again.to_string(),
                 reader_url: None,
             }),
         });
     }
 
-    let rendered = match render_workspace(&workspace) {
-        Ok(rendered) => rendered,
-        Err(error) => {
-            state.metrics.inc_failure();
-            state
-                .repository
-                .update_job_status(
-                    &job_id,
-                    JobStatus::Failed,
-                    Some("The draft changed, but render refresh failed.".to_string()),
-                    Some(changed_files),
-                    Some(format!("render refresh failure: {error:#}")),
-                )
-                .await?;
-            return Ok(MessageApiResponse {
-                handled: true,
-                ignored: false,
-                notification: Some(Notification {
-                    provider: message.provider,
-                    provider_chat_id: message.provider_chat_id,
-                    message: "The draft changed, but the reader view could not be refreshed."
+    if let Err(error) = render_workspace(&workspace) {
+        state.metrics.inc_failure();
+        state
+            .repository
+            .update_job_status(
+                &job_id,
+                JobStatus::Failed,
+                Some(
+                    localized_text(language)
+                        .render_refresh_failed_job
                         .to_string(),
-                    reader_url: None,
-                }),
-            });
-        }
-    };
-    persist_render_snapshot(
+                ),
+                Some(changed_files),
+                Some(format!("render refresh failure: {error:#}")),
+            )
+            .await?;
+        return Ok(MessageApiResponse {
+            handled: true,
+            ignored: false,
+            notification: Some(Notification {
+                provider: message.provider,
+                provider_chat_id: message.provider_chat_id,
+                message: localized_text(language)
+                    .render_refresh_failed_user
+                    .to_string(),
+                reader_url: None,
+            }),
+        });
+    }
+    persist_revision(
         &state,
         &book_id,
         &job_id,
         &revision_summary(&changed_files, &outcome),
-        rendered,
     )
     .await?;
     state.repository.touch_book(&book_id).await?;
@@ -246,23 +304,24 @@ pub async fn finalize_authoring(
         .update_job_status(
             &job_id,
             JobStatus::Succeeded,
-            Some("The draft was updated successfully.".to_string()),
+            Some(localized_text(language).draft_updated_job.to_string()),
             Some(changed_files),
             None,
         )
         .await?;
-    let token = issue_token(&state.config.reader_token_secret, &book_id, 24 * 30)?;
+    let token = issue_token(
+        &state.config.reader_token_secret,
+        &book_id,
+        READER_TOKEN_TTL_HOURS,
+    )?;
     Ok(MessageApiResponse {
         handled: true,
         ignored: false,
         notification: Some(Notification {
             provider: message.provider,
             provider_chat_id: message.provider_chat_id,
-            message: "Draft updated successfully.".to_string(),
-            reader_url: Some(format!(
-                "{}/reader/{}",
-                state.config.frontend_base_url, token
-            )),
+            message: localized_text(language).draft_updated_user.to_string(),
+            reader_url: Some(reader_url(&state.config.frontend_base_url, &token)),
         }),
     })
 }
@@ -307,30 +366,26 @@ pub async fn seed_initial_render(
         .update_job_status(
             &job.job_id,
             JobStatus::Succeeded,
-            Some("Initial draft created.".to_string()),
+            Some(
+                localized_text(read_book_language(workspace))
+                    .initial_draft_created
+                    .to_string(),
+            ),
             Some(Vec::new()),
             None,
         )
         .await?;
-    let rendered = render_workspace(workspace)?;
-    persist_render_snapshot(
-        state,
-        book_id,
-        &job.job_id,
-        "Initial workspace render",
-        rendered,
-    )
-    .await
+    render_workspace(workspace)?;
+    persist_revision(state, book_id, &job.job_id, "Initial workspace render").await
 }
 
-pub async fn persist_render_snapshot(
+pub async fn persist_revision(
     state: &AppState,
     book_id: &str,
     job_id: &str,
     summary: &str,
-    rendered: RenderedBook,
 ) -> Result<()> {
-    let revision = state
+    state
         .repository
         .create_revision(
             book_id,
@@ -339,15 +394,56 @@ pub async fn persist_render_snapshot(
             RevisionRenderStatus::Ready,
         )
         .await?;
-    let storage_location =
-        write_render_snapshot(&state.config.data_dir, &revision.revision_id, &rendered)?;
-    state
-        .repository
-        .create_render_snapshot(
-            &revision.revision_id,
-            storage_location,
-            rendered.content_hash,
-        )
-        .await?;
     Ok(())
+}
+
+struct LocalizedAuthoringText {
+    job_accepted: &'static str,
+    job_running: &'static str,
+    job_failed_to_start: &'static str,
+    job_could_not_start: &'static str,
+    job_timed_out: &'static str,
+    job_timed_out_before_finish: &'static str,
+    job_failed: &'static str,
+    job_failed_try_again: &'static str,
+    render_refresh_failed_job: &'static str,
+    render_refresh_failed_user: &'static str,
+    draft_updated_job: &'static str,
+    draft_updated_user: &'static str,
+    initial_draft_created: &'static str,
+}
+
+fn localized_text(language: BookLanguage) -> LocalizedAuthoringText {
+    match language {
+        BookLanguage::English => LocalizedAuthoringText {
+            job_accepted: "Job accepted",
+            job_running: "Job running",
+            job_failed_to_start: "The writing job failed before it could start.",
+            job_could_not_start: "The writing job could not be started. Please try again.",
+            job_timed_out: "The writing job timed out.",
+            job_timed_out_before_finish: "The writing job timed out before finishing.",
+            job_failed: "The writing job failed.",
+            job_failed_try_again: "The writing job failed. Please try again.",
+            render_refresh_failed_job: "The draft changed, but render refresh failed.",
+            render_refresh_failed_user: "The draft changed, but the reader view could not be refreshed.",
+            draft_updated_job: "The draft was updated successfully.",
+            draft_updated_user: "Draft updated successfully.",
+            initial_draft_created: "Initial draft created.",
+        },
+        BookLanguage::Russian => LocalizedAuthoringText {
+            job_accepted: "Задача принята",
+            job_running: "Задача выполняется",
+            job_failed_to_start: "Задачу написания не удалось запустить.",
+            job_could_not_start: "Задачу написания не удалось запустить. Попробуйте еще раз.",
+            job_timed_out: "Задача написания не завершилась вовремя.",
+            job_timed_out_before_finish: "Задача написания не успела завершиться.",
+            job_failed: "Задача написания завершилась с ошибкой.",
+            job_failed_try_again: "Задача написания завершилась с ошибкой. Попробуйте еще раз.",
+            render_refresh_failed_job: "Черновик изменился, но обновить отображение не удалось.",
+            render_refresh_failed_user: "Черновик изменился, но читательский вид не удалось обновить.",
+            draft_updated_job: "Черновик успешно обновлен.",
+            draft_updated_user: "Черновик успешно обновлен.",
+            initial_draft_created: "Первый черновик создан.",
+        },
+    }
 }

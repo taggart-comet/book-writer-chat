@@ -68,6 +68,50 @@ pub enum RevisionRenderStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BookLanguage {
+    #[serde(rename = "en")]
+    English,
+    #[serde(rename = "ru")]
+    Russian,
+}
+
+impl Default for BookLanguage {
+    fn default() -> Self {
+        Self::English
+    }
+}
+
+impl BookLanguage {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_lowercase().as_str() {
+            "en" | "eng" | "english" => Some(Self::English),
+            "ru" | "rus" | "russian" | "русский" | "русскии" | "рус" => {
+                Some(Self::Russian)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn from_manifest_code(value: &str) -> Self {
+        Self::parse(value).unwrap_or_default()
+    }
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::English => "en",
+            Self::Russian => "ru",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::English => "English",
+            Self::Russian => "Russian",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RepositoryBindingStatus {
@@ -134,16 +178,6 @@ pub struct Revision {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RenderSnapshot {
-    pub render_snapshot_id: String,
-    pub revision_id: String,
-    pub format: String,
-    pub storage_location: String,
-    pub created_at: DateTime<Utc>,
-    pub content_hash: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepositoryBinding {
     pub repository_binding_id: String,
     pub book_id: String,
@@ -155,6 +189,32 @@ pub struct RepositoryBinding {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageAttachmentKind {
+    Image,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessageAttachment {
+    pub kind: MessageAttachmentKind,
+    pub provider_file_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_unique_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_filename: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NormalizedMessage {
     pub provider: Provider,
@@ -162,7 +222,7 @@ pub struct NormalizedMessage {
     pub message_id: String,
     pub timestamp: DateTime<Utc>,
     pub raw_text: String,
-    pub attachments: Vec<String>,
+    pub attachments: Vec<MessageAttachment>,
     pub mentions_bot: bool,
     pub sender_display_name: String,
 }
@@ -180,6 +240,7 @@ pub struct ReaderSummary {
     pub book_id: String,
     pub title: String,
     pub subtitle: String,
+    pub language: BookLanguage,
     pub status: BookStatus,
     pub last_revision_id: Option<String>,
     pub last_updated_at: DateTime<Utc>,
@@ -202,6 +263,7 @@ pub struct ReaderContentResponse {
     pub chapter_index: usize,
     pub chapter_id: String,
     pub title: String,
+    pub source_file: String,
     pub html: String,
     pub has_more: bool,
     pub next_cursor: Option<String>,

@@ -13,7 +13,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-http://127.0.0.1:5173}" \
-  cargo run &
+  cargo run --bin book-writer-chat &
 BACKEND_PID=$!
 
 if command -v npm >/dev/null 2>&1; then
@@ -23,7 +23,7 @@ if command -v npm >/dev/null 2>&1; then
       npm install
     fi
     PUBLIC_BACKEND_BASE_URL="${PUBLIC_BACKEND_BASE_URL:-http://127.0.0.1:3000}" \
-      npm run dev -- --host 0.0.0.0
+      npm run dev -- --host 127.0.0.1
   ) &
   FRONTEND_PID=$!
 fi

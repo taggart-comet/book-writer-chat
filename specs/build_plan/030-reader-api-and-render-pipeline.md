@@ -17,7 +17,7 @@ This action should implement:
 - revision endpoint
 - job status endpoint
 - render assembly from Markdown and YAML workspace sources
-- render snapshot generation or caching strategy for deterministic delivery
+- live rendering from the current workspace files for reader delivery
 
 ## Required Decisions
 

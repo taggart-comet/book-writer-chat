@@ -25,7 +25,9 @@ pub struct Config {
     pub frontend_dist_dir: PathBuf,
     pub frontend_base_url: String,
     pub telegram_bot_username: String,
+    pub telegram_bot_token: Option<String>,
     pub max_bot_handle: String,
+    pub max_access_token: Option<String>,
     pub reader_token_secret: String,
     pub codex_cli_path: String,
     pub codex_cli_args: Vec<String>,
@@ -100,7 +102,13 @@ impl Config {
             frontend_base_url,
             telegram_bot_username: env::var("TELEGRAM_BOT_USERNAME")
                 .unwrap_or_else(|_| "bookbot".to_string()),
+            telegram_bot_token: env::var("TELEGRAM_BOT_TOKEN")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
             max_bot_handle: env::var("MAX_BOT_HANDLE").unwrap_or_else(|_| "bookbot".to_string()),
+            max_access_token: env::var("MAX_ACCESS_TOKEN")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
             reader_token_secret,
             codex_cli_path: env::var("CODEX_CLI_PATH").unwrap_or_else(|_| "codex".to_string()),
             codex_cli_args: env::var("CODEX_CLI_ARGS")
@@ -205,6 +213,7 @@ mod tests {
             "FRONTEND_DIST_DIR",
             "FRONTEND_BASE_URL",
             "READER_TOKEN_SECRET",
+            "TELEGRAM_BOT_TOKEN",
         ] {
             unsafe { env::remove_var(key) };
         }
@@ -256,6 +265,7 @@ mod tests {
         assert_eq!(config.environment, AppEnvironment::Production);
         assert_eq!(config.bind_addr, "0.0.0.0:4300".parse().unwrap());
         assert_eq!(config.frontend_base_url, "https://books.example.com");
+        assert_eq!(config.telegram_bot_token, None);
         assert_eq!(
             config.data_dir,
             PathBuf::from("/var/lib/book-writer-chat/state")

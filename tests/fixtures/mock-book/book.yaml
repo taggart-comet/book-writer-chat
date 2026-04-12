@@ -1,0 +1,48 @@
+book_id: mock-book
+conversation_key: telegram:mock-demo
+title: The Quiet Lighthouse
+subtitle: Notes on Building Calm Systems in Busy Lives
+language: en
+render_profile: standard-book
+content:
+- id: title-page
+  kind: frontmatter
+  file: content/frontmatter/001-title-page.md
+- id: preface
+  kind: frontmatter
+  file: content/frontmatter/010-preface.md
+- id: chapter-1
+  kind: chapter
+  file: content/chapters/001-begin-with-a-room.md
+- id: chapter-2
+  kind: chapter
+  file: content/chapters/002-small-systems.md
+- id: chapter-3
+  kind: chapter
+  file: content/chapters/003-thresholds.md
+- id: chapter-4
+  kind: chapter
+  file: content/chapters/004-notes-that-return.md
+- id: chapter-5
+  kind: chapter
+  file: content/chapters/005-the-first-pass.md
+- id: chapter-6
+  kind: chapter
+  file: content/chapters/006-revision-rhythm.md
+- id: chapter-7
+  kind: chapter
+  file: content/chapters/007-quiet-metrics.md
+- id: chapter-8
+  kind: chapter
+  file: content/chapters/008-scenes-and-shelves.md
+- id: chapter-9
+  kind: chapter
+  file: content/chapters/009-when-the-thread-breaks.md
+- id: chapter-10
+  kind: chapter
+  file: content/chapters/010-small-requests.md
+- id: appendix-a
+  kind: backmatter
+  file: content/backmatter/001-field-notes.md
+assets:
+  images_dir: assets/images

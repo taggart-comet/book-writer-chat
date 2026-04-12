@@ -27,7 +27,6 @@ pub struct Database {
     pub sessions: HashMap<String, AuthoringSession>,
     pub jobs: HashMap<String, WritingJob>,
     pub revisions: HashMap<String, Revision>,
-    pub render_snapshots: HashMap<String, RenderSnapshot>,
     pub repository_bindings: HashMap<String, RepositoryBinding>,
     pub conversation_to_book: HashMap<String, String>,
     pub next_id: u64,
@@ -281,28 +280,6 @@ impl Repository {
         Ok(revision)
     }
 
-    pub async fn create_render_snapshot(
-        &self,
-        revision_id: &str,
-        storage_location: String,
-        content_hash: String,
-    ) -> Result<RenderSnapshot> {
-        let snapshot = RenderSnapshot {
-            render_snapshot_id: self.next_id("render").await,
-            revision_id: revision_id.to_string(),
-            format: "html".to_string(),
-            storage_location,
-            created_at: Utc::now(),
-            content_hash,
-        };
-        let mut db = self.db.write().await;
-        db.render_snapshots
-            .insert(snapshot.render_snapshot_id.clone(), snapshot.clone());
-        drop(db);
-        self.persist().await?;
-        Ok(snapshot)
-    }
-
     pub async fn latest_revision_for_book(&self, book_id: &str) -> Option<Revision> {
         let db = self.db.read().await;
         db.revisions
@@ -321,24 +298,6 @@ impl Repository {
             .cloned()
     }
 
-    pub async fn latest_render_snapshot_for_revision(
-        &self,
-        revision_id: &str,
-    ) -> Option<RenderSnapshot> {
-        let db = self.db.read().await;
-        db.render_snapshots
-            .values()
-            .filter(|snapshot| snapshot.revision_id == revision_id)
-            .max_by_key(|snapshot| snapshot.created_at)
-            .cloned()
-    }
-
-    pub async fn latest_render_snapshot_for_book(&self, book_id: &str) -> Option<RenderSnapshot> {
-        let revision = self.latest_revision_for_book(book_id).await?;
-        self.latest_render_snapshot_for_revision(&revision.revision_id)
-            .await
-    }
-
     pub async fn get_book(&self, book_id: &str) -> Option<Book> {
         self.db.read().await.books.get(book_id).cloned()
     }
@@ -353,15 +312,6 @@ impl Repository {
 
     pub async fn get_revision(&self, revision_id: &str) -> Option<Revision> {
         self.db.read().await.revisions.get(revision_id).cloned()
-    }
-
-    pub async fn get_render_snapshot(&self, render_snapshot_id: &str) -> Option<RenderSnapshot> {
-        self.db
-            .read()
-            .await
-            .render_snapshots
-            .get(render_snapshot_id)
-            .cloned()
     }
 
     pub async fn upsert_repository_binding(
@@ -541,14 +491,6 @@ mod tests {
             )
             .await
             .unwrap();
-        let render_snapshot = repo
-            .create_render_snapshot(
-                &revision.revision_id,
-                "books-data/telegram-123/render.html".to_string(),
-                "hash".to_string(),
-            )
-            .await
-            .unwrap();
         let binding = repo
             .upsert_repository_binding(
                 &book.book_id,
@@ -588,13 +530,6 @@ mod tests {
                 .unwrap()
                 .revision_id,
             revision.revision_id
-        );
-        assert_eq!(
-            repo.get_render_snapshot(&render_snapshot.render_snapshot_id)
-                .await
-                .unwrap()
-                .render_snapshot_id,
-            render_snapshot.render_snapshot_id
         );
         assert_eq!(
             repo.get_repository_binding_for_book(&book.book_id)

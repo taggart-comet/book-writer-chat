@@ -72,6 +72,7 @@ Start the backend like this:
 
 ```bash
 TELEGRAM_BOT_USERNAME=mybookwriterbot \
+TELEGRAM_BOT_TOKEN=<YOUR_BOT_TOKEN> \
 FRONTEND_BASE_URL=https://replace-this-after-you-start-the-tunnel \
 RUST_LOG=debug \
 cargo run
@@ -116,6 +117,7 @@ Then restart the backend so `FRONTEND_BASE_URL` matches that public URL:
 
 ```bash
 TELEGRAM_BOT_USERNAME=mybookwriterbot \
+TELEGRAM_BOT_TOKEN=<YOUR_BOT_TOKEN> \
 FRONTEND_BASE_URL=https://example-tunnel.ngrok-free.app \
 RUST_LOG=debug \
 cargo run
@@ -298,4 +300,3 @@ For production-like verification:
 2. deploy the Docker image to a public host
 3. point Telegram webhook at the deployed `/api/messages/telegram`
 4. keep `READER_TOKEN_SECRET` non-default
-

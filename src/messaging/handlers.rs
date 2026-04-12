@@ -7,13 +7,13 @@ use tracing::error;
 use crate::{
     app::state::AppState,
     authoring::flow::{authoring_flow, seed_initial_render},
-    core::models::{NormalizedMessage, Notification, Provider},
+    core::models::{BookLanguage, NormalizedMessage, Notification, Provider},
     messaging::{
         commands::{ParsedCommand, parse_command},
         providers::{normalize_max, normalize_telegram},
     },
-    reader::links::issue_token,
-    storage::workspace::{ensure_workspace, workspace_dir},
+    reader::links::{READER_TOKEN_TTL_HOURS, issue_token, reader_url},
+    storage::workspace::{ensure_workspace_with_language, read_book_language, workspace_dir},
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -125,6 +125,16 @@ pub async fn message_flow(
         Provider::Max => &state.config.max_bot_handle,
     };
     let Some(parsed) = parse_command(&message.raw_text, message.mentions_bot, bot_name) else {
+        if !message.attachments.is_empty() {
+            return authoring_flow(
+                state,
+                conversation.conversation_id,
+                message,
+                "Add the attached image to the book where it best fits, with suitable alt text and caption."
+                    .to_string(),
+            )
+            .await;
+        }
         return Ok(MessageApiResponse {
             handled: false,
             ignored: true,
@@ -133,7 +143,12 @@ pub async fn message_flow(
     };
 
     match parsed {
-        ParsedCommand::Init => init_flow(state, conversation.conversation_id, message).await,
+        ParsedCommand::Init(language) => {
+            init_flow(state, conversation.conversation_id, message, language).await
+        }
+        ParsedCommand::UnsupportedInitLanguage(value) => {
+            unsupported_language_flow(message, value).await
+        }
         ParsedCommand::Status => status_flow(state, conversation.conversation_id, message).await,
         ParsedCommand::Authoring(instruction) => {
             authoring_flow(state, conversation.conversation_id, message, instruction).await
@@ -145,13 +160,16 @@ pub async fn init_flow(
     state: AppState,
     conversation_id: String,
     message: NormalizedMessage,
+    language: BookLanguage,
 ) -> Result<MessageApiResponse> {
     let existing = state
         .repository
         .find_book_by_conversation(&conversation_id)
         .await;
-    let book = if let Some(book) = existing {
-        book
+    let (book, effective_language) = if let Some(book) = existing {
+        let effective_language =
+            read_book_language(&std::path::PathBuf::from(&book.workspace_path));
+        (book, effective_language)
     } else {
         let workspace = workspace_dir(&state.config.books_root, &conversation_id);
         let workspace_path = workspace.display().to_string();
@@ -163,7 +181,12 @@ pub async fn init_flow(
                 workspace_path,
             )
             .await?;
-        let workspace = ensure_workspace(&state.config.books_root, &conversation_id, &book)?;
+        let workspace = ensure_workspace_with_language(
+            &state.config.books_root,
+            &conversation_id,
+            &book,
+            language,
+        )?;
         seed_initial_render(
             &state,
             &book.book_id,
@@ -172,22 +195,41 @@ pub async fn init_flow(
             &message.message_id,
         )
         .await?;
-        book
+        (book, language)
     };
-    let token = issue_token(&state.config.reader_token_secret, &book.book_id, 24 * 30)?;
+    let token = issue_token(
+        &state.config.reader_token_secret,
+        &book.book_id,
+        READER_TOKEN_TTL_HOURS,
+    )?;
     let reply = Notification {
         provider: message.provider,
         provider_chat_id: message.provider_chat_id,
-        message: "Book workspace is ready for this conversation.".to_string(),
-        reader_url: Some(format!(
-            "{}/reader/{}",
-            state.config.frontend_base_url, token
-        )),
+        message: localized_message(effective_language).book_ready.to_string(),
+        reader_url: Some(reader_url(&state.config.frontend_base_url, &token)),
     };
     Ok(MessageApiResponse {
         handled: true,
         ignored: false,
         notification: Some(reply),
+    })
+}
+
+pub async fn unsupported_language_flow(
+    message: NormalizedMessage,
+    value: String,
+) -> Result<MessageApiResponse> {
+    Ok(MessageApiResponse {
+        handled: true,
+        ignored: false,
+        notification: Some(Notification {
+            provider: message.provider,
+            provider_chat_id: message.provider_chat_id,
+            message: format!(
+                "Unsupported book language `{value}`. Use `/bookbot init en` for English or `/bookbot init ru` for Russian."
+            ),
+            reader_url: None,
+        }),
     })
 }
 
@@ -201,6 +243,7 @@ pub async fn status_flow(
         .find_book_by_conversation(&conversation_id)
         .await
     {
+        let language = read_book_language(&std::path::PathBuf::from(&book.workspace_path));
         let revision = state
             .repository
             .latest_revision_for_book(&book.book_id)
@@ -209,21 +252,37 @@ pub async fn status_flow(
         Notification {
             provider: message.provider,
             provider_chat_id: message.provider_chat_id,
-            message: format!(
-                "Book status: {:?}. Latest revision: {}. Latest job: {}.",
-                book.status,
-                revision
-                    .as_ref()
-                    .map(|revision| revision.revision_id.as_str())
-                    .unwrap_or("none"),
-                job.as_ref()
-                    .map(|job| format!("{:?}", job.status))
-                    .unwrap_or_else(|| "none".to_string())
-            ),
-            reader_url: Some(format!(
-                "{}/reader/{}",
-                state.config.frontend_base_url,
-                issue_token(&state.config.reader_token_secret, &book.book_id, 24 * 30)?
+            message: match language {
+                BookLanguage::English => format!(
+                    "Book status: {:?}. Latest revision: {}. Latest job: {}.",
+                    book.status,
+                    revision
+                        .as_ref()
+                        .map(|revision| revision.revision_id.as_str())
+                        .unwrap_or("none"),
+                    job.as_ref()
+                        .map(|job| format!("{:?}", job.status))
+                        .unwrap_or_else(|| "none".to_string())
+                ),
+                BookLanguage::Russian => format!(
+                    "Статус книги: {:?}. Последняя версия: {}. Последняя задача: {}.",
+                    book.status,
+                    revision
+                        .as_ref()
+                        .map(|revision| revision.revision_id.as_str())
+                        .unwrap_or("нет"),
+                    job.as_ref()
+                        .map(|job| format!("{:?}", job.status))
+                        .unwrap_or_else(|| "нет".to_string())
+                ),
+            },
+            reader_url: Some(reader_url(
+                &state.config.frontend_base_url,
+                &issue_token(
+                    &state.config.reader_token_secret,
+                    &book.book_id,
+                    READER_TOKEN_TTL_HOURS,
+                )?,
             )),
         }
     } else {
@@ -239,4 +298,19 @@ pub async fn status_flow(
         ignored: false,
         notification: Some(response),
     })
+}
+
+struct LocalizedMessageText {
+    book_ready: &'static str,
+}
+
+fn localized_message(language: BookLanguage) -> LocalizedMessageText {
+    match language {
+        BookLanguage::English => LocalizedMessageText {
+            book_ready: "Book workspace is ready for this conversation.",
+        },
+        BookLanguage::Russian => LocalizedMessageText {
+            book_ready: "Рабочая область книги готова для этой беседы.",
+        },
+    }
 }

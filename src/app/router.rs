@@ -3,39 +3,53 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use axum::{
     Router,
-    http::Uri,
+    http::{HeaderValue, Method, Uri},
     response::Html,
     routing::{get, post},
 };
 use tokio::sync::Mutex;
-use tower_http::services::ServeDir;
+use tower_http::{
+    cors::{Any, CorsLayer},
+    services::ServeDir,
+};
 
 use crate::{
     app::{metrics::Metrics, state::AppState},
     authoring::executor::RealExecutor,
     core::config::Config,
     messaging::handlers::{max_webhook, telegram_webhook},
-    reader::{
-        handlers::{reader_content, reader_job, reader_revision, reader_summary},
-        html::reader_shell,
-    },
+    messaging::media::{DynMediaDownloader, RealMediaDownloader},
+    reader::handlers::{reader_asset, reader_content, reader_job, reader_revision, reader_summary},
     storage::repository::Repository,
 };
 
 pub async fn build_router(
     config: Config,
     executor: Option<crate::authoring::executor::DynExecutor>,
+    media_downloader: Option<DynMediaDownloader>,
 ) -> Result<Router> {
     config.ensure_directories()?;
     let repository = Repository::load(&config.data_dir).await?;
     let executor = executor.unwrap_or_else(|| Arc::new(RealExecutor::new(config.clone())));
+    let media_downloader =
+        media_downloader.unwrap_or_else(|| Arc::new(RealMediaDownloader::new(config.clone())));
     let state = AppState {
         config: config.clone(),
         repository,
         executor,
+        media_downloader,
         metrics: Metrics::default(),
         conversation_locks: Arc::new(Mutex::new(HashMap::new())),
     };
+
+    let cors = HeaderValue::from_str(&config.frontend_base_url)
+        .map(|origin| {
+            CorsLayer::new()
+                .allow_origin(origin)
+                .allow_methods([Method::GET, Method::POST])
+                .allow_headers(Any)
+        })
+        .unwrap_or_else(|_| CorsLayer::new());
 
     let mut router = Router::new()
         .route("/api/healthz", get(health))
@@ -47,9 +61,10 @@ pub async fn build_router(
         .route("/api/messages/max", post(max_webhook))
         .route("/api/reader/summary", get(reader_summary))
         .route("/api/reader/content", get(reader_content))
+        .route("/api/reader/assets/*asset_path", get(reader_asset))
         .route("/api/reader/revision", get(reader_revision))
         .route("/api/reader/job", get(reader_job))
-        .route("/reader/:token", get(reader_shell))
+        .layer(cors)
         .with_state(state);
 
     if config.frontend_dist_dir.exists() {

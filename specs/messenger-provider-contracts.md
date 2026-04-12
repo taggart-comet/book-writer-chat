@@ -9,7 +9,7 @@ This specification freezes the MVP messenger triggering rules and fixture shapes
 MVP provider coverage is:
 
 - Telegram: real adapter behavior
-- MAX: contract-compatible stub adapter with fixture-driven normalization
+- MAX: real image attachment normalization and download behavior, plus legacy fixture compatibility
 
 This keeps the provider abstraction honest without blocking implementation on an under-specified second platform integration.
 
@@ -26,6 +26,16 @@ Every provider adapter must normalize inbound messages into this shape:
 - `mentions_bot`
 - `sender_display_name`
 
+For v1 image support, `attachments` contains typed image attachment records rather than raw strings. Each image attachment includes:
+
+- `kind: image`
+- provider file identifiers
+- optional original filename, MIME type, dimensions, byte size, and caption
+
+Telegram supports real image intake for photos and image documents. Telegram image captions are treated like message text for bot mention and command parsing. The backend uses `TELEGRAM_BOT_TOKEN` only when it needs to call Telegram `getFile` and download an image.
+
+MAX supports real image intake for official `message_created` webhook updates. MAX image attachments have `type: image` and a payload containing `photo_id`, `token`, and `url`; the adapter maps the image URL into the existing provider file identifier field and keeps `photo_id` as the optional unique identifier. The production downloader fetches that URL only while processing an authoring message with image attachments. Unsupported MAX attachment types are rejected.
+
 ## Bot Identity
 
 The backend must be configured with a canonical bot handle per provider.
@@ -33,7 +43,11 @@ The backend must be configured with a canonical bot handle per provider.
 Suggested environment keys:
 
 - `TELEGRAM_BOT_USERNAME`
+- `TELEGRAM_BOT_TOKEN`
 - `MAX_BOT_HANDLE`
+- `MAX_ACCESS_TOKEN`
+
+`MAX_ACCESS_TOKEN` is the MAX Bot API access token used for webhook subscription and other bot API operations. Inbound image download uses the official attachment `payload.url` supplied by MAX in the webhook body.
 
 ## Trigger Rules
 

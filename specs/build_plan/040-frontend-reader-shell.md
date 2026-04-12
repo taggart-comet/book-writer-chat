@@ -17,6 +17,7 @@ This action should implement:
 - loading, empty, updating, and error states
 - chapter or content continuation navigation
 - visible revision freshness and job status indicators
+- selection actions for copying rendered text and copying a manuscript source reference for messenger feedback
 - a design direction that feels intentional and book-like rather than generic app chrome
 
 ## Required Decisions
@@ -32,6 +33,7 @@ This action should implement:
 - The frontend can load large book content incrementally using the backend contract.
 - Revision freshness and recent job state are visible without exposing backend internals.
 - The route structure supports direct linking to a specific book view.
+- Selecting rendered book text exposes copy actions for selected text and source-file line/character references.
 - The implementation uses only approved dependency versions from the reference project.
 
 ## Verification
@@ -49,5 +51,6 @@ This action should implement:
 - Use Puppeteer MCP to open Chromium and verify:
   - the reader page loads successfully from a real link
   - chapter or content continuation works
+  - selecting rendered text exposes copy text and copy reference actions
   - empty and error states are rendered correctly
   - screenshots can be captured for the main reading view and at least one alternate state

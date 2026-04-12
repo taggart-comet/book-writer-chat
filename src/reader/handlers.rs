@@ -1,9 +1,9 @@
 use anyhow::{Result, anyhow};
 use axum::{
     Json,
-    extract::{Query, State},
-    http::StatusCode,
-    response::IntoResponse,
+    extract::{Path as AxumPath, Query, State},
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
 };
 use serde::Deserialize;
 
@@ -11,13 +11,17 @@ use crate::{
     app::{errors::api_error, state::AppState},
     core::models::{
         Book, BookStatus, ReaderContentResponse, ReaderJobResponse, ReaderRevisionResponse,
-        ReaderSummary, RenderSnapshot, Revision, RevisionRenderStatus,
+        ReaderSummary, Revision, RevisionRenderStatus,
     },
     reader::{
         content::{ChapterCursor, ContentQuery, encode_cursor, requested_chapter_index},
-        links::verify_token,
+        links::{ReaderTokenError, verify_token},
     },
-    storage::render_store::{RenderedBook, read_render_snapshot},
+    storage::{
+        media_assets::{content_type_for_asset_path, ensure_workspace_asset_path},
+        render_store::{RenderedBook, render_workspace},
+        workspace::read_book_language,
+    },
 };
 
 #[derive(Debug, Deserialize)]
@@ -34,6 +38,15 @@ pub async fn resolve_book_for_token(state: &AppState, token: &str) -> Result<Boo
         .ok_or_else(|| anyhow!("book not found"))
 }
 
+fn reader_access_error(error: anyhow::Error) -> axum::response::Response {
+    let status = if error.downcast_ref::<ReaderTokenError>().is_some() {
+        StatusCode::FORBIDDEN
+    } else {
+        StatusCode::UNAUTHORIZED
+    };
+    api_error(status, "access_denied", error.to_string())
+}
+
 pub async fn reader_summary(
     State(state): State<AppState>,
     Query(query): Query<TokenQuery>,
@@ -44,23 +57,24 @@ pub async fn reader_summary(
                 .repository
                 .latest_revision_for_book(&book.book_id)
                 .await;
-            let snapshot = state
-                .repository
-                .latest_render_snapshot_for_book(&book.book_id)
-                .await;
-            let chapter_count = snapshot
+            let rendered = render_workspace(std::path::Path::new(&book.workspace_path));
+            let chapter_count = rendered
                 .as_ref()
-                .and_then(|snapshot| read_render_snapshot(&snapshot.storage_location).ok())
                 .map(|rendered| rendered.chapters.len())
                 .unwrap_or(0);
-            let render_status = revision
-                .as_ref()
-                .map(|revision| revision.render_status.clone())
-                .unwrap_or(RevisionRenderStatus::Ready);
+            let render_status = if rendered.is_ok() {
+                revision
+                    .as_ref()
+                    .map(|revision| revision.render_status.clone())
+                    .unwrap_or(RevisionRenderStatus::Ready)
+            } else {
+                RevisionRenderStatus::Failed
+            };
             let summary = ReaderSummary {
                 book_id: book.book_id,
                 title: book.title,
                 subtitle: "Draft in progress".to_string(),
+                language: read_book_language(std::path::Path::new(&book.workspace_path)),
                 status: BookStatus::Active,
                 last_revision_id: revision.map(|revision| revision.revision_id),
                 last_updated_at: book.updated_at,
@@ -69,7 +83,7 @@ pub async fn reader_summary(
             };
             (StatusCode::OK, Json(summary)).into_response()
         }
-        Err(error) => api_error(StatusCode::UNAUTHORIZED, "access_denied", error.to_string()),
+        Err(error) => reader_access_error(error),
     }
 }
 
@@ -82,7 +96,7 @@ pub async fn reader_content(
             match load_latest_rendered_book(&state, &book.book_id, query.revision_id.as_deref())
                 .await
             {
-                Ok((revision, snapshot, rendered)) => {
+                Ok((revision, rendered)) => {
                     let index =
                         match requested_chapter_index(&rendered, &query, &revision.revision_id) {
                             Ok(index) => index,
@@ -91,11 +105,12 @@ pub async fn reader_content(
                     if let Some(chapter) = rendered.chapters.get(index) {
                         let payload = ReaderContentResponse {
                             revision_id: revision.revision_id.clone(),
-                            content_hash: snapshot.content_hash,
+                            content_hash: rendered.content_hash.clone(),
                             chapter_index: index,
                             chapter_id: chapter.id.clone(),
                             title: chapter.title.clone(),
-                            html: chapter.html.clone(),
+                            source_file: chapter.source_file.clone(),
+                            html: rewrite_reader_asset_urls(&chapter.html, &query.token),
                             has_more: index + 1 < rendered.chapters.len(),
                             next_cursor: (index + 1 < rendered.chapters.len()).then(|| {
                                 encode_cursor(&ChapterCursor {
@@ -116,8 +131,33 @@ pub async fn reader_content(
                 Err(response) => response,
             }
         }
-        Err(error) => api_error(StatusCode::UNAUTHORIZED, "access_denied", error.to_string()),
+        Err(error) => reader_access_error(error),
     }
+}
+
+pub async fn reader_asset(
+    State(state): State<AppState>,
+    AxumPath(asset_path): AxumPath<String>,
+    Query(query): Query<TokenQuery>,
+) -> Response {
+    let asset_path = asset_path.trim_start_matches('/');
+    match resolve_book_for_token(&state, &query.token).await {
+        Ok(book) => match load_reader_asset(&book, asset_path) {
+            Ok((content_type, bytes)) => {
+                ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
+            }
+            Err(error) => api_error(StatusCode::NOT_FOUND, "asset_not_found", error.to_string()),
+        },
+        Err(error) => reader_access_error(error),
+    }
+}
+
+fn load_reader_asset(book: &Book, asset_path: &str) -> Result<(&'static str, Vec<u8>)> {
+    ensure_workspace_asset_path(asset_path)?;
+    let content_type = content_type_for_asset_path(asset_path)
+        .ok_or_else(|| anyhow!("unsupported reader asset type"))?;
+    let path = std::path::Path::new(&book.workspace_path).join(asset_path);
+    Ok((content_type, std::fs::read(path)?))
 }
 
 pub async fn reader_revision(
@@ -131,21 +171,25 @@ pub async fn reader_revision(
                 .latest_revision_for_book(&book.book_id)
                 .await
             {
-                let snapshot = state
-                    .repository
-                    .latest_render_snapshot_for_revision(&revision.revision_id)
-                    .await;
+                let rendered = render_workspace(std::path::Path::new(&book.workspace_path));
                 let payload = ReaderRevisionResponse {
                     revision_id: revision.revision_id,
                     created_at: revision.created_at,
                     source_job_id: revision.job_id,
                     summary: revision.summary.clone(),
-                    render_status: revision.render_status.clone(),
-                    content_hash: snapshot
+                    render_status: if rendered.is_ok() {
+                        revision.render_status.clone()
+                    } else {
+                        RevisionRenderStatus::Failed
+                    },
+                    content_hash: rendered
                         .as_ref()
-                        .map(|snapshot| snapshot.content_hash.clone()),
-                    render_error: (revision.render_status == RevisionRenderStatus::Failed)
-                        .then_some(revision.summary),
+                        .ok()
+                        .map(|rendered| rendered.content_hash.clone()),
+                    render_error: rendered.err().map(|error| error.to_string()).or_else(|| {
+                        (revision.render_status == RevisionRenderStatus::Failed)
+                            .then_some(revision.summary)
+                    }),
                 };
                 (StatusCode::OK, Json(payload)).into_response()
             } else {
@@ -156,8 +200,47 @@ pub async fn reader_revision(
                 )
             }
         }
-        Err(error) => api_error(StatusCode::UNAUTHORIZED, "access_denied", error.to_string()),
+        Err(error) => reader_access_error(error),
     }
+}
+
+fn rewrite_reader_asset_urls(html: &str, token: &str) -> String {
+    let html = rewrite_reader_asset_urls_for_quote(html, token, '"');
+    rewrite_reader_asset_urls_for_quote(&html, token, '\'')
+}
+
+fn rewrite_reader_asset_urls_for_quote(html: &str, token: &str, quote: char) -> String {
+    let marker = format!("src={quote}assets/images/");
+    let replacement = format!("src={quote}/api/reader/assets/assets/images/");
+    let mut output = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(index) = rest.find(&marker) {
+        let (before, after_before) = rest.split_at(index);
+        output.push_str(before);
+        output.push_str(&replacement);
+        let after_marker = &after_before[marker.len()..];
+        if let Some(end_index) = after_marker.find(quote) {
+            let (asset_tail, after_asset) = after_marker.split_at(end_index);
+            output.push_str(asset_tail);
+            output.push_str("?token=");
+            output.push_str(&escape_html_attr(token));
+            output.push(quote);
+            rest = &after_asset[quote.len_utf8()..];
+        } else {
+            output.push_str(after_marker);
+            rest = "";
+        }
+    }
+    output.push_str(rest);
+    output
+}
+
+fn escape_html_attr(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 pub async fn reader_job(
@@ -183,7 +266,7 @@ pub async fn reader_job(
                 )
             }
         }
-        Err(error) => api_error(StatusCode::UNAUTHORIZED, "access_denied", error.to_string()),
+        Err(error) => reader_access_error(error),
     }
 }
 
@@ -191,7 +274,7 @@ pub async fn load_latest_rendered_book(
     state: &AppState,
     book_id: &str,
     expected_revision_id: Option<&str>,
-) -> std::result::Result<(Revision, RenderSnapshot, RenderedBook), axum::response::Response> {
+) -> std::result::Result<(Revision, RenderedBook), axum::response::Response> {
     let revision = match state.repository.latest_revision_for_book(book_id).await {
         Some(revision) => revision,
         None => {
@@ -221,26 +304,22 @@ pub async fn load_latest_rendered_book(
         ));
     }
 
-    let snapshot = match state
-        .repository
-        .latest_render_snapshot_for_revision(&revision.revision_id)
-        .await
-    {
-        Some(snapshot) => snapshot,
+    let book = match state.repository.get_book(book_id).await {
+        Some(book) => book,
         None => {
             return Err(api_error(
                 StatusCode::NOT_FOUND,
-                "render_snapshot_missing",
-                "No render snapshot is available for the latest revision.",
+                "book_not_found",
+                "Requested book was not found.",
             ));
         }
     };
 
-    match read_render_snapshot(&snapshot.storage_location) {
-        Ok(rendered) => Ok((revision, snapshot, rendered)),
+    match render_workspace(std::path::Path::new(&book.workspace_path)) {
+        Ok(rendered) => Ok((revision, rendered)),
         Err(error) => Err(api_error(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "render_snapshot_invalid",
+            "render_failed",
             error.to_string(),
         )),
     }

@@ -35,6 +35,8 @@ Minimum normalized fields:
 - `mentions_bot`
 - `sender_display_name` if available from the provider
 
+For v1, image attachments are typed records. Telegram photos, Telegram image documents, and MAX official image attachments can be downloaded into the book workspace before the agent runs. Unsupported MAX media attachment types are rejected instead of being passed through as authoring context.
+
 The backend should treat `provider_chat_id` as the primary external identity key for a book conversation.
 
 The exact MVP provider trigger rules and fixture expectations are defined in `messenger-provider-contracts.md`.
@@ -66,7 +68,7 @@ The backend should distinguish between:
 
 Examples of MVP Rust-native control commands:
 
-- initialize a book for the conversation
+- initialize a book for the conversation, with optional language selection through `init en` or `init ru`; bare `init` defaults to English
 - show book status
 
 These commands must be handled entirely in Rust without LLM or Codex agent involvement.
@@ -89,6 +91,8 @@ Before invoking Codex, the backend should compose a prompt package from:
 - current book context
 - recent conversation summary
 - execution constraints for file access and output expectations
+
+For books whose manifest language is `en` or `ru`, the prompt package should explicitly tell the agent to communicate with the author and write new manuscript prose in the selected language unless the user explicitly requests quoted text in another language.
 
 This layer is important because messenger input alone is too underspecified and should not directly define raw agent behavior.
 

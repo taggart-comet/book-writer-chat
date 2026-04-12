@@ -5,8 +5,8 @@
 Refactor the backend from the current flat `src/` layout into a small number of domain-oriented module trees. The key split is:
 
 - `messaging/`: inbound provider normalization, command parsing, webhook entrypoints, conversation command flow
-- `reader/`: reader APIs, signed reader-link HTML delivery, render snapshot loading, cursor handling
-- `authoring/`: prompt construction, executor integration, job lifecycle orchestration, revision/render persistence
+- `reader/`: reader APIs, signed reader-link HTML delivery, live workspace rendering, cursor handling
+- `authoring/`: prompt construction, executor integration, job lifecycle orchestration, revision persistence
 - `app/`: top-level composition only
 - `core/`: shared types/utilities that are truly cross-cutting
 - `storage/`: persistence and workspace filesystem access
@@ -130,14 +130,14 @@ Purpose: authoring job execution lifecycle.
   - `authoring_flow`
   - `finalize_authoring`
   - `seed_initial_render`
-  - `persist_render_snapshot`
+  - `persist_revision`
   - `revision_summary`
   - any job-state transition helpers
 - `authoring/mod.rs`
   - wire exports for app/messaging usage
 
 ### `reader/`
-Purpose: signed links, reader APIs, reader HTML, and chapter/cursor logic.
+Purpose: signed links, reader APIs, and chapter/cursor logic.
 
 - `reader/links.rs`
   - move current `reader_links.rs`
@@ -148,10 +148,6 @@ Purpose: signed links, reader APIs, reader HTML, and chapter/cursor logic.
   - `reader_job`
   - `resolve_book_for_token`
   - `load_latest_rendered_book`
-- `reader/html.rs`
-  - `reader_shell`
-  - `render_reader_shell_html`
-  - `escape_html`
 - `reader/content.rs`
   - `ContentQuery`
   - `ChapterCursor`
@@ -215,7 +211,6 @@ Everything currently in `app.rs` moves out as follows:
 - Init/status command behavior -> `messaging/handlers.rs`
 - Authoring execution pipeline -> `authoring/flow.rs`
 - Reader API handlers -> `reader/handlers.rs`
-- Reader shell HTML route + renderer helpers -> `reader/html.rs`
 - Cursor parsing/encoding and chapter selection helpers -> `reader/content.rs`
 - Test module -> split so helpers go in `app/test_support.rs`; end-to-end tests can remain under `app/router.rs` test module or move to dedicated integration-style test modules under the new domain modules, but production code files must not carry the whole current helper pile
 

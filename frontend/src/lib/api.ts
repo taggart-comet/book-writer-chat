@@ -4,6 +4,7 @@ export type ReaderSummary = {
   book_id: string;
   title: string;
   subtitle: string;
+  language: 'en' | 'ru';
   status: string;
   last_revision_id: string | null;
   last_updated_at: string;
@@ -17,6 +18,7 @@ export type ReaderContent = {
   chapter_index: number;
   chapter_id: string;
   title: string;
+  source_file: string;
   html: string;
   has_more: boolean;
   next_cursor: string | null;
@@ -61,19 +63,30 @@ async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(apiUrl(path));
   if (!response.ok) {
     const text = await response.text();
+    let code: string | undefined;
+    let message = text;
+
     try {
       const payload = JSON.parse(text) as ReaderApiErrorPayload;
-      throw new ReaderApiError(payload.message ?? text, {
-        code: payload.code,
-        status: response.status
-      });
+      code = payload.code;
+      message = payload.message ?? text;
     } catch {
-      throw new ReaderApiError(text, {
-        status: response.status
-      });
+      // Keep the raw response text when the backend did not return structured JSON.
     }
+
+    throw new ReaderApiError(message, {
+      code,
+      status: response.status
+    });
   }
   return await response.json();
+}
+
+function rewriteReaderHtmlAssetUrls(html: string): string {
+  return html.replace(
+    /(<img\b[^>]*\bsrc=)(["'])\/api\/reader\/assets\//gi,
+    (_match, prefix: string, quote: string) => `${prefix}${quote}${apiUrl('/api/reader/assets/')}`
+  );
 }
 
 export function fetchSummary(token: string) {
@@ -91,7 +104,10 @@ export function fetchContent(
   if (options.revisionId) {
     params.set('revision_id', options.revisionId);
   }
-  return getJson<ReaderContent>(`/api/reader/content?${params.toString()}`);
+  return getJson<ReaderContent>(`/api/reader/content?${params.toString()}`).then((content) => ({
+    ...content,
+    html: rewriteReaderHtmlAssetUrls(content.html)
+  }));
 }
 
 export function fetchRevision(token: string) {
