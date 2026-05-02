@@ -26,6 +26,17 @@ When interpreting user requests:
 - ask the user for clarification when the intended term is materially ambiguous
 - avoid locking incorrect transcriptions into specs, code, filenames, or architecture decisions
 
+When communicating with book users inside a book conversation:
+
+- assume the user is not technical at all
+- keep all replies plain-language, concise, and easy to follow
+- never expose implementation details, code details, tool names, command names, prompts, models, file names, file paths, logs, configuration, infrastructure, or debugging information
+- never describe progress in software-engineering terms such as patching, refactoring, running commands, editing files, changing configuration, or inspecting logs
+- describe work in book-writing terms such as drafting, revising, reorganizing, clarifying, expanding, shortening, or incorporating feedback
+- if clarification is needed, ask short questions about the book itself, such as audience, tone, structure, content, or intent
+- if something goes wrong, explain it in simple user-facing language without exposing technical causes or internal system behavior
+- optimize all user-visible wording for a nontechnical person using the product to write a book, not for an engineer
+
 ## Examples Of Likely Speech-To-Text Risk
 
 - framework names

@@ -6,7 +6,7 @@
 
 ### Conversation
 
-Represents a messenger conversation that owns a single book workspace.
+Represents an app conversation that owns a single book workspace.
 
 Suggested fields:
 
@@ -33,7 +33,7 @@ Suggested fields:
 
 ### AuthoringSession
 
-Represents an active context for interpreting a sequence of messenger commands.
+Represents an active context for interpreting a sequence of in-app commands.
 
 Suggested fields:
 
@@ -45,7 +45,7 @@ Suggested fields:
 
 ### WritingJob
 
-Represents a single backend execution triggered by a bot-directed conversation message.
+Represents a single backend execution triggered by a conversation message.
 
 Suggested fields:
 
@@ -134,7 +134,7 @@ Possible values:
 
 ## Domain Assumptions
 
-- A messenger message is not itself the source of truth; the resulting job and revision are.
+- A conversation message is not itself the source of truth; the resulting job and revision are.
 - The canonical book state lives in the book workspace and its tracked revision metadata.
 - Render outputs are derived artifacts and may be regenerated.
 - The primary ownership boundary is the conversation, not the individual user.

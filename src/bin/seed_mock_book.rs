@@ -9,7 +9,6 @@ use book_writer_chat::{
         config::Config,
         models::{CommandKind, Provider, RevisionRenderStatus},
     },
-    reader::links::{READER_TOKEN_TTL_HOURS, issue_token, reader_url},
     storage::{
         render_store::render_workspace,
         repository::Repository,
@@ -17,7 +16,7 @@ use book_writer_chat::{
     },
 };
 
-const MOCK_CONVERSATION_ID: &str = "telegram:mock-demo";
+const MOCK_CONVERSATION_ID: &str = "app:mock-demo";
 const MOCK_TITLE: &str = "The Quiet Lighthouse";
 
 #[tokio::main]
@@ -28,7 +27,7 @@ async fn main() -> Result<()> {
     let repository = Repository::load(&config.data_dir).await?;
     let conversation = repository
         .resolve_or_create_conversation(
-            Provider::Telegram,
+            Provider::App,
             MOCK_CONVERSATION_ID.to_string(),
             "Mock demo conversation".to_string(),
         )
@@ -86,16 +85,15 @@ async fn main() -> Result<()> {
         )
         .await?;
 
-    let token = issue_token(
-        &config.reader_token_secret,
-        &book.book_id,
-        READER_TOKEN_TTL_HOURS,
-    )?;
     println!("Mock book seeded.");
     println!("Workspace: {}", workspace.display());
     let reader_base_url =
         std::env::var("FRONTEND_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:5173".to_string());
-    println!("Reader URL: {}", reader_url(&reader_base_url, &token));
+    println!(
+        "Reader URL: {}/reader/{}",
+        reader_base_url.trim_end_matches('/'),
+        book.book_id
+    );
 
     Ok(())
 }

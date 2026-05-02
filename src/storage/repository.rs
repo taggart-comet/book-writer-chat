@@ -302,6 +302,19 @@ impl Repository {
         self.db.read().await.books.get(book_id).cloned()
     }
 
+    pub async fn find_book_by_workspace_path(
+        &self,
+        workspace_path: &std::path::Path,
+    ) -> Option<Book> {
+        self.db
+            .read()
+            .await
+            .books
+            .values()
+            .find(|book| std::path::Path::new(&book.workspace_path) == workspace_path)
+            .cloned()
+    }
+
     pub async fn get_session(&self, session_id: &str) -> Option<AuthoringSession> {
         self.db.read().await.sessions.get(session_id).cloned()
     }
@@ -377,6 +390,8 @@ impl Repository {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use tempfile::tempdir;
 
     use super::*;
@@ -386,11 +401,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let repo = Repository::load(dir.path()).await.unwrap();
         let conversation = repo
-            .resolve_or_create_conversation(
-                Provider::Telegram,
-                "telegram:123".to_string(),
-                "Test".to_string(),
-            )
+            .resolve_or_create_conversation(Provider::App, "app:123".to_string(), "App".to_string())
             .await
             .unwrap();
         let one = repo
@@ -413,38 +424,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn normalizes_conversation_identity_per_provider() {
+    async fn normalizes_app_conversation_identity() {
         let dir = tempdir().unwrap();
         let repo = Repository::load(dir.path()).await.unwrap();
 
-        let telegram_one = repo
-            .resolve_or_create_conversation(
-                Provider::Telegram,
-                "123".to_string(),
-                "Telegram".to_string(),
-            )
+        let app_one = repo
+            .resolve_or_create_conversation(Provider::App, "123".to_string(), "App".to_string())
             .await
             .unwrap();
-        let telegram_two = repo
-            .resolve_or_create_conversation(
-                Provider::Telegram,
-                "telegram:123".to_string(),
-                "Telegram".to_string(),
-            )
+        let app_two = repo
+            .resolve_or_create_conversation(Provider::App, "app:123".to_string(), "App".to_string())
             .await
             .unwrap();
-        let max_one = repo
-            .resolve_or_create_conversation(Provider::Max, "123".to_string(), "MAX".to_string())
-            .await
-            .unwrap();
-
-        assert_eq!(telegram_one.conversation_id, "telegram:123");
-        assert_eq!(telegram_one.conversation_id, telegram_two.conversation_id);
-        assert_eq!(telegram_one.provider_chat_id, "telegram:123");
-        assert_eq!(max_one.conversation_id, "max:123");
+        assert_eq!(app_one.conversation_id, "app:123");
+        assert_eq!(app_one.conversation_id, app_two.conversation_id);
+        assert_eq!(app_one.provider_chat_id, "app:123");
 
         let snapshot = repo.snapshot().await;
-        assert_eq!(snapshot.conversations.len(), 2);
+        assert_eq!(snapshot.conversations.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn loads_legacy_telegram_provider_state() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("state.json"),
+            r#"{
+  "conversations": {
+    "telegram:mock-demo": {
+      "conversation_id": "telegram:mock-demo",
+      "provider": "telegram",
+      "provider_chat_id": "telegram:mock-demo",
+      "title": "Mock demo conversation",
+      "created_at": "2026-04-07T10:15:17.984048Z",
+      "status": "active"
+    }
+  },
+  "books": {},
+  "sessions": {},
+  "jobs": {},
+  "revisions": {},
+  "repository_bindings": {},
+  "conversation_to_book": {},
+  "next_id": 1
+}"#,
+        )
+        .unwrap();
+
+        let repo = Repository::load(dir.path()).await.unwrap();
+        let snapshot = repo.snapshot().await;
+        let conversation = snapshot.conversations.get("telegram:mock-demo").unwrap();
+
+        assert_eq!(conversation.provider, Provider::Telegram);
+        assert_eq!(conversation.provider.as_str(), "telegram");
     }
 
     #[tokio::test]
@@ -453,8 +485,8 @@ mod tests {
         let repo = Repository::load(dir.path()).await.unwrap();
         let conversation = repo
             .resolve_or_create_conversation(
-                Provider::Telegram,
-                "telegram:123".to_string(),
+                Provider::App,
+                "app:123".to_string(),
                 "Test".to_string(),
             )
             .await
@@ -463,7 +495,7 @@ mod tests {
             .create_book(
                 &conversation.conversation_id,
                 "Draft".to_string(),
-                "books-data/telegram-123".to_string(),
+                "books-data/app-123".to_string(),
             )
             .await
             .unwrap();
@@ -546,8 +578,8 @@ mod tests {
         let repo = Repository::load(dir.path()).await.unwrap();
         let conversation = repo
             .resolve_or_create_conversation(
-                Provider::Telegram,
-                "telegram:123".to_string(),
+                Provider::App,
+                "app:123".to_string(),
                 "Test".to_string(),
             )
             .await
@@ -556,7 +588,7 @@ mod tests {
             .create_book(
                 &conversation.conversation_id,
                 "Draft".to_string(),
-                "books-data/telegram-123".to_string(),
+                "books-data/app-123".to_string(),
             )
             .await
             .unwrap();
@@ -618,8 +650,8 @@ mod tests {
         let repo = Repository::load(dir.path()).await.unwrap();
         let conversation = repo
             .resolve_or_create_conversation(
-                Provider::Telegram,
-                "telegram:123".to_string(),
+                Provider::App,
+                "app:123".to_string(),
                 "Test".to_string(),
             )
             .await
@@ -628,7 +660,7 @@ mod tests {
             .create_book(
                 &conversation.conversation_id,
                 "Draft".to_string(),
-                "books-data/telegram-123".to_string(),
+                "books-data/app-123".to_string(),
             )
             .await
             .unwrap();

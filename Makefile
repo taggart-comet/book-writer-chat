@@ -15,7 +15,7 @@ help:
 		'  make test              Run the Rust test suite' \
 		'  make frontend-check    Run frontend typecheck and production build' \
 		'  make check             Run backend and frontend verification together' \
-		'  make build             Build the combined deployment image' \
+		'  make build             Build the combined linux/amd64 deployment image' \
 		'  make deployment-smoke  Build and smoke test the combined container'
 
 up:

@@ -16,11 +16,6 @@ if [ -z "${FRONTEND_BASE_URL:-}" ]; then
   exit 1
 fi
 
-if [ -z "${READER_TOKEN_SECRET:-}" ] || [ "${READER_TOKEN_SECRET}" = "dev-reader-secret" ]; then
-  echo "READER_TOKEN_SECRET must be set to a non-default value" >&2
-  exit 1
-fi
-
 mkdir -p "$APP_DATA_DIR" "$APP_BOOKS_ROOT" "$CADDY_DATA_DIR" "$CADDY_CONFIG_DIR"
 
 terminate() {

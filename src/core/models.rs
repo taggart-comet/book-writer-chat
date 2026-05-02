@@ -4,15 +4,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
+    App,
     Telegram,
-    Max,
 }
 
 impl Provider {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::App => "app",
             Self::Telegram => "telegram",
-            Self::Max => "max",
         }
     }
 }

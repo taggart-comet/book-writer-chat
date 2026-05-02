@@ -17,12 +17,17 @@ Each numbered file is a separate build action specification with:
 2. `020-domain-persistence-and-book-workspace.md`
 3. `030-reader-api-and-render-pipeline.md`
 4. `040-frontend-reader-shell.md`
-5. `050-messenger-adapters-and-command-routing.md`
-6. `060-agent-execution-and-job-lifecycle.md`
-7. `070-end-to-end-authoring-flow.md`
-8. `071-app-module-refactor.md`
-9. `075-deployment-packaging-and-runtime.md`
-10. `080-observability-hardening-and-release-readiness.md`
+5. `041-web-authentication.md`
+6. `042-web-book-provisioning-and-conversation-registry.md`
+7. `043-web-conversation-session-transcript-api.md`
+8. `044-web-messenger-shell-and-conversation-list.md`
+9. `045-reader-selection-mention-flow.md`
+10. `050-messenger-adapters-and-command-routing.md`
+11. `060-agent-execution-and-job-lifecycle.md`
+12. `070-end-to-end-authoring-flow.md`
+13. `071-app-module-refactor.md`
+14. `075-deployment-packaging-and-runtime.md`
+15. `080-observability-hardening-and-release-readiness.md`
 
 ## Established Conventions
 

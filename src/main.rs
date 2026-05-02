@@ -8,7 +8,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
-    let router = build_router(config.clone(), None, None).await?;
+    let router = build_router(config.clone()).await?;
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
     tracing::info!(address = %config.bind_addr, "server listening");
     axum::serve(listener, router).await?;

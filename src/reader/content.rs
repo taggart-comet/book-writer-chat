@@ -6,7 +6,6 @@ use crate::{app::errors::api_error, storage::render_store::RenderedBook};
 
 #[derive(Debug, Deserialize)]
 pub struct ContentQuery {
-    pub token: String,
     pub cursor: Option<String>,
     pub chapter_id: Option<String>,
     pub revision_id: Option<String>,

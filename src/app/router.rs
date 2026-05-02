@@ -5,7 +5,7 @@ use axum::{
     Router,
     http::{HeaderValue, Method, Uri},
     response::Html,
-    routing::{get, post},
+    routing::get,
 };
 use tokio::sync::Mutex;
 use tower_http::{
@@ -14,32 +14,26 @@ use tower_http::{
 };
 
 use crate::{
-    app::{metrics::Metrics, state::AppState},
-    authoring::executor::RealExecutor,
+    app::{
+        auth,
+        metrics::Metrics,
+        state::{AppState, RealSessionLauncher},
+        web_books, web_conversations,
+    },
     core::config::Config,
-    messaging::handlers::{max_webhook, telegram_webhook},
-    messaging::media::{DynMediaDownloader, RealMediaDownloader},
     reader::handlers::{reader_asset, reader_content, reader_job, reader_revision, reader_summary},
     storage::repository::Repository,
 };
 
-pub async fn build_router(
-    config: Config,
-    executor: Option<crate::authoring::executor::DynExecutor>,
-    media_downloader: Option<DynMediaDownloader>,
-) -> Result<Router> {
+pub async fn build_router(config: Config) -> Result<Router> {
     config.ensure_directories()?;
     let repository = Repository::load(&config.data_dir).await?;
-    let executor = executor.unwrap_or_else(|| Arc::new(RealExecutor::new(config.clone())));
-    let media_downloader =
-        media_downloader.unwrap_or_else(|| Arc::new(RealMediaDownloader::new(config.clone())));
     let state = AppState {
         config: config.clone(),
         repository,
-        executor,
-        media_downloader,
         metrics: Metrics::default(),
         conversation_locks: Arc::new(Mutex::new(HashMap::new())),
+        session_launcher: Arc::new(RealSessionLauncher::new(config.clone())),
     };
 
     let cors = HeaderValue::from_str(&config.frontend_base_url)
@@ -57,13 +51,14 @@ pub async fn build_router(
         .route("/healthz", get(health))
         .route("/readyz", get(ready))
         .route("/api/metrics", get(metrics))
-        .route("/api/messages/telegram", post(telegram_webhook))
-        .route("/api/messages/max", post(max_webhook))
-        .route("/api/reader/summary", get(reader_summary))
-        .route("/api/reader/content", get(reader_content))
-        .route("/api/reader/assets/*asset_path", get(reader_asset))
-        .route("/api/reader/revision", get(reader_revision))
-        .route("/api/reader/job", get(reader_job))
+        .nest("/api", auth::routes())
+        .nest("/api", web_books::routes())
+        .nest("/api", web_conversations::routes())
+        .route("/api/reader/:book_id/summary", get(reader_summary))
+        .route("/api/reader/:book_id/content", get(reader_content))
+        .route("/api/reader/:book_id/assets/*asset_path", get(reader_asset))
+        .route("/api/reader/:book_id/revision", get(reader_revision))
+        .route("/api/reader/:book_id/job", get(reader_job))
         .layer(cors)
         .with_state(state);
 

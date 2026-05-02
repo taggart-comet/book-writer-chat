@@ -24,11 +24,9 @@ pub struct Config {
     pub books_root: PathBuf,
     pub frontend_dist_dir: PathBuf,
     pub frontend_base_url: String,
-    pub telegram_bot_username: String,
-    pub telegram_bot_token: Option<String>,
-    pub max_bot_handle: String,
-    pub max_access_token: Option<String>,
-    pub reader_token_secret: String,
+    pub web_auth_username: String,
+    pub web_auth_password: String,
+    pub jwt_signing_secret: String,
     pub codex_cli_path: String,
     pub codex_cli_args: Vec<String>,
     pub agent_timeout_secs: u64,
@@ -79,17 +77,14 @@ impl Config {
 
         let frontend_base_url =
             env::var("FRONTEND_BASE_URL").unwrap_or_else(|_| format!("http://{}", bind_addr));
-        let reader_token_secret =
-            env::var("READER_TOKEN_SECRET").unwrap_or_else(|_| "dev-reader-secret".to_string());
+        let web_auth_username = required_env("WEB_AUTH_USERNAME")?;
+        let web_auth_password = required_env("WEB_AUTH_PASSWORD")?;
+        let jwt_signing_secret = required_env("JWT_SIGNING_SECRET")?;
 
         if matches!(environment, AppEnvironment::Production) {
             anyhow::ensure!(
                 !frontend_base_url.trim().is_empty(),
                 "FRONTEND_BASE_URL is required in production so generated reader links use the public site URL"
-            );
-            anyhow::ensure!(
-                reader_token_secret != "dev-reader-secret",
-                "READER_TOKEN_SECRET must be set explicitly in production"
             );
         }
 
@@ -100,16 +95,9 @@ impl Config {
             books_root,
             frontend_dist_dir,
             frontend_base_url,
-            telegram_bot_username: env::var("TELEGRAM_BOT_USERNAME")
-                .unwrap_or_else(|_| "bookbot".to_string()),
-            telegram_bot_token: env::var("TELEGRAM_BOT_TOKEN")
-                .ok()
-                .filter(|value| !value.trim().is_empty()),
-            max_bot_handle: env::var("MAX_BOT_HANDLE").unwrap_or_else(|_| "bookbot".to_string()),
-            max_access_token: env::var("MAX_ACCESS_TOKEN")
-                .ok()
-                .filter(|value| !value.trim().is_empty()),
-            reader_token_secret,
+            web_auth_username,
+            web_auth_password,
+            jwt_signing_secret,
             codex_cli_path: env::var("CODEX_CLI_PATH").unwrap_or_else(|_| "codex".to_string()),
             codex_cli_args: env::var("CODEX_CLI_ARGS")
                 .unwrap_or_default()
@@ -137,6 +125,12 @@ fn resolve_path(cwd: &Path, value: &str) -> PathBuf {
     } else {
         normalize_relative_path(cwd, &path)
     }
+}
+
+fn required_env(key: &'static str) -> Result<String> {
+    let value = env::var(key).with_context(|| format!("{key} is required"))?;
+    anyhow::ensure!(!value.trim().is_empty(), "{key} must not be empty");
+    Ok(value)
 }
 
 impl AppEnvironment {
@@ -193,14 +187,21 @@ fn normalize_relative_path(base: &Path, relative: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
+pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
+#[cfg(test)]
 mod tests {
     use std::sync::MutexGuard;
 
     use super::*;
 
     fn env_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+        test_env_lock()
     }
 
     fn clear_env() {
@@ -212,10 +213,19 @@ mod tests {
             "APP_DATA_DIR",
             "FRONTEND_DIST_DIR",
             "FRONTEND_BASE_URL",
-            "READER_TOKEN_SECRET",
-            "TELEGRAM_BOT_TOKEN",
+            "WEB_AUTH_USERNAME",
+            "WEB_AUTH_PASSWORD",
+            "JWT_SIGNING_SECRET",
         ] {
             unsafe { env::remove_var(key) };
+        }
+    }
+
+    fn set_required_auth_env() {
+        unsafe {
+            env::set_var("WEB_AUTH_USERNAME", "operator");
+            env::set_var("WEB_AUTH_PASSWORD", "secret-password");
+            env::set_var("JWT_SIGNING_SECRET", "jwt-test-secret");
         }
     }
 
@@ -223,6 +233,7 @@ mod tests {
     fn loads_development_defaults() {
         let _guard = env_lock();
         clear_env();
+        set_required_auth_env();
 
         let config = Config::from_env().unwrap();
 
@@ -238,6 +249,7 @@ mod tests {
         let _guard = env_lock();
         clear_env();
         unsafe { env::set_var("APP_ENV", "test") };
+        set_required_auth_env();
 
         let config = Config::from_env().unwrap();
 
@@ -257,15 +269,14 @@ mod tests {
             env::set_var("APP_HOST", "0.0.0.0");
             env::set_var("APP_PORT", "4300");
             env::set_var("FRONTEND_BASE_URL", "https://books.example.com");
-            env::set_var("READER_TOKEN_SECRET", "prod-secret");
         }
+        set_required_auth_env();
 
         let config = Config::from_env().unwrap();
 
         assert_eq!(config.environment, AppEnvironment::Production);
         assert_eq!(config.bind_addr, "0.0.0.0:4300".parse().unwrap());
         assert_eq!(config.frontend_base_url, "https://books.example.com");
-        assert_eq!(config.telegram_bot_token, None);
         assert_eq!(
             config.data_dir,
             PathBuf::from("/var/lib/book-writer-chat/state")
@@ -281,24 +292,6 @@ mod tests {
     }
 
     #[test]
-    fn production_requires_non_default_reader_secret() {
-        let _guard = env_lock();
-        clear_env();
-        unsafe {
-            env::set_var("APP_ENV", "production");
-            env::set_var("FRONTEND_BASE_URL", "https://books.example.com");
-        }
-
-        let error = Config::from_env().unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("READER_TOKEN_SECRET must be set explicitly in production")
-        );
-    }
-
-    #[test]
     fn resolves_relative_books_root_inside_workspace_boundary() {
         let _guard = env_lock();
         clear_env();
@@ -306,11 +299,54 @@ mod tests {
             env::set_var("APP_ENV", "test");
             env::set_var("APP_BOOKS_ROOT", "books-data/../books-data/session-root");
         }
+        set_required_auth_env();
 
         let cwd = env::current_dir().unwrap();
         let config = Config::from_env().unwrap();
 
         assert_eq!(config.books_root, cwd.join("books-data/session-root"));
         assert!(config.books_root.starts_with(&cwd));
+    }
+
+    #[test]
+    fn fails_clearly_when_web_auth_username_is_missing() {
+        let _guard = env_lock();
+        clear_env();
+        unsafe {
+            env::set_var("WEB_AUTH_PASSWORD", "secret-password");
+            env::set_var("JWT_SIGNING_SECRET", "jwt-test-secret");
+        }
+
+        let error = Config::from_env().unwrap_err();
+
+        assert!(error.to_string().contains("WEB_AUTH_USERNAME is required"));
+    }
+
+    #[test]
+    fn fails_clearly_when_web_auth_password_is_missing() {
+        let _guard = env_lock();
+        clear_env();
+        unsafe {
+            env::set_var("WEB_AUTH_USERNAME", "operator");
+            env::set_var("JWT_SIGNING_SECRET", "jwt-test-secret");
+        }
+
+        let error = Config::from_env().unwrap_err();
+
+        assert!(error.to_string().contains("WEB_AUTH_PASSWORD is required"));
+    }
+
+    #[test]
+    fn fails_clearly_when_jwt_signing_secret_is_missing() {
+        let _guard = env_lock();
+        clear_env();
+        unsafe {
+            env::set_var("WEB_AUTH_USERNAME", "operator");
+            env::set_var("WEB_AUTH_PASSWORD", "secret-password");
+        }
+
+        let error = Config::from_env().unwrap_err();
+
+        assert!(error.to_string().contains("JWT_SIGNING_SECRET is required"));
     }
 }

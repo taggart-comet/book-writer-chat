@@ -100,7 +100,7 @@ Suggested example shape:
 
 ```yaml
 book_id: habits-for-busy-parents
-conversation_key: telegram-123456
+conversation_key: app-123456
 title: Habits for Busy Parents
 subtitle: Small Systems for Real Life
 language: en
@@ -226,7 +226,7 @@ The storage model should separate:
 
 Image files should live under `assets/images/`.
 
-V1 messenger image intake stores downloaded Telegram and MAX image files in this directory with deterministic safe filenames such as `telegram-<message-id>-<index>.png` or `max-<message-id>-<index>.png`. The backend supplies the saved workspace-relative paths to the authoring agent, and the agent places plain Markdown image references in manuscript files. The richer central YAML registry described below remains the preferred long-term model, but it is not required for v1 placement.
+V1 image intake stores downloaded image files in this directory with deterministic safe filenames such as `app-<message-id>-<index>.png`. The backend supplies the saved workspace-relative paths to the authoring agent, and the agent places plain Markdown image references in manuscript files. The richer central YAML registry described below remains the preferred long-term model, but it is not required for v1 placement.
 
 Each image may optionally have associated metadata recorded either:
 
@@ -299,7 +299,7 @@ The workspace folder itself is the concrete on-disk representation of the book i
 
 In other words:
 
-- one messenger conversation
+- one app conversation
 - one book
 - one workspace folder
 

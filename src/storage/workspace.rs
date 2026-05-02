@@ -229,14 +229,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let book = Book {
             book_id: "book-1".to_string(),
-            conversation_id: "telegram:1".to_string(),
+            conversation_id: "app:1".to_string(),
             title: "Sample".to_string(),
             status: BookStatus::Active,
             workspace_path: String::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        let workspace = ensure_workspace(dir.path(), "telegram:1", &book).unwrap();
+        let workspace = ensure_workspace(dir.path(), "app:1", &book).unwrap();
         assert!(workspace.join("book.yaml").exists());
         assert!(workspace.join("style.yaml").exists());
         assert!(workspace.join("content/frontmatter").exists());
@@ -252,7 +252,7 @@ mod tests {
 
         let manifest = read_manifest(&workspace).unwrap();
         assert_eq!(manifest.book_id, "book-1");
-        assert_eq!(manifest.conversation_key, "telegram:1");
+        assert_eq!(manifest.conversation_key, "app:1");
         assert_eq!(manifest.language, "en");
         assert_eq!(manifest.assets.images_dir, "assets/images");
         assert_eq!(manifest.content.len(), 2);
@@ -263,7 +263,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let book = Book {
             book_id: "book-1".to_string(),
-            conversation_id: "telegram:1".to_string(),
+            conversation_id: "app:1".to_string(),
             title: "Sample".to_string(),
             status: BookStatus::Active,
             workspace_path: String::new(),
@@ -271,7 +271,7 @@ mod tests {
             updated_at: Utc::now(),
         };
         let workspace =
-            ensure_workspace_with_language(dir.path(), "telegram:1", &book, BookLanguage::Russian)
+            ensure_workspace_with_language(dir.path(), "app:1", &book, BookLanguage::Russian)
                 .unwrap();
 
         let manifest = read_manifest(&workspace).unwrap();

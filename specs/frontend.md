@@ -4,7 +4,7 @@
 
 ## Purpose
 
-This specification defines the high-level frontend direction for the web application that renders the user’s in-progress book after each messenger-driven change.
+This specification defines the high-level frontend direction for the web application that renders the user’s in-progress book after each in-app conversation change.
 
 ## Framework Direction
 
@@ -15,7 +15,7 @@ The frontend is responsible for:
 - rendering the current book draft in a polished reading interface
 - fetching current book and job state from the Rust backend
 - presenting loading, updating, and error states clearly
-- serving as the browser destination linked from messenger replies
+- integrating the reader with the app messenger flow
 
 ## Security And Dependency Policy
 
@@ -69,24 +69,43 @@ At the high level, the frontend should provide:
 - a book reading view
 - revision freshness/status indicators
 - clear empty/loading/error states
-- direct access from messenger-provided links
+- direct access from app-generated reader links
+
+## Responsive Direction
+
+The web UI must be mobile-first.
+
+Requirements:
+
+- design primary layouts for narrow mobile viewports first, then enhance for larger screens
+- support both phone-sized and desktop-sized browsers without losing core functionality
+- avoid desktop-only interaction assumptions such as hover-only affordances or permanently wide side panels
+- keep navigation, reader actions, and messenger actions accessible on touch devices
+- treat responsive behavior as part of the product contract, not a later polish task
 
 The frontend should not assume the final internal structure of the book yet. It must be prepared to render a backend-defined content contract that may evolve while the manuscript model is still being specified.
 
 ## Selection Reference Tools
 
-The reader must support selecting visible book text and copying it for authoring feedback.
+The reader must support selecting visible book text and using that selection for authoring feedback.
 
 Required selection actions:
 
 - Copy text: copies the selected rendered text exactly enough for ordinary paste workflows.
-- Copy reference: copies a manuscript reference suitable for pasting into the messenger conversation that drives edits.
+- `Упомянуть эти строки`: opens an action menu for sending a manuscript reference into the web messenger flow.
 
-The copied reference must include:
+The `Упомянуть эти строки` action must offer exactly two options:
+
+- in a new conversation
+- in the latest active conversation
+
+The generated manuscript reference payload must include:
 
 - the Markdown source file path for the selected rendered text
 - the selected line and character span in that source file
 - the selected rendered text as a quoted excerpt
+
+If the user chooses the latest active conversation option, the frontend must resolve that target using conversation metadata supplied by the backend for the current book.
 
 This is an intentional authoring workflow exception to the frontend’s normal render-oriented boundary. The frontend must still not fetch raw manuscript files directly; it may consume source-reference metadata only when that metadata is emitted by the reader API as part of render output.
 

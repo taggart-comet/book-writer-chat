@@ -77,8 +77,25 @@ fn markdown_to_html(workspace: &Path, markdown: &str, source_file: &str) -> Resu
     for (event, range) in parser.into_offset_iter() {
         match event {
             Event::Start(tag) => {
-                if let Tag::Image { dest_url, .. } = &tag {
-                    validate_image_reference(workspace, dest_url.as_ref())?;
+                if let Tag::Image {
+                    link_type,
+                    dest_url,
+                    title,
+                    id,
+                } = tag
+                {
+                    let normalized_dest_url =
+                        normalize_image_reference(workspace, source_file, dest_url.as_ref())?;
+                    events.push(Event::Start(
+                        Tag::Image {
+                            link_type,
+                            dest_url: CowStr::from(normalized_dest_url),
+                            title,
+                            id,
+                        }
+                        .into_static(),
+                    ));
+                    continue;
                 }
                 events.push(Event::Start(tag.into_static()));
             }
@@ -106,15 +123,45 @@ fn markdown_to_html(workspace: &Path, markdown: &str, source_file: &str) -> Resu
     Ok(html_output)
 }
 
-fn validate_image_reference(workspace: &Path, dest_url: &str) -> Result<()> {
-    if dest_url.starts_with("assets/images/") {
-        ensure_workspace_asset_path(dest_url)?;
-        let image_path = workspace.join(dest_url);
-        if !image_path.exists() {
-            return Err(anyhow!("image reference `{dest_url}` does not exist"));
-        }
+fn normalize_image_reference(
+    workspace: &Path,
+    source_file: &str,
+    dest_url: &str,
+) -> Result<String> {
+    let normalized = if dest_url.starts_with("assets/images/") {
+        dest_url.to_string()
+    } else if let Some(trimmed) = dest_url.strip_prefix("/assets/images/") {
+        format!("assets/images/{trimmed}")
+    } else if let Ok(path) = resolve_workspace_relative_image_path(workspace, source_file, dest_url)
+    {
+        path
+    } else if let Ok(path) = std::path::Path::new(dest_url).strip_prefix(workspace) {
+        path.to_string_lossy().replace('\\', "/")
+    } else {
+        return Ok(dest_url.to_string());
+    };
+
+    ensure_workspace_asset_path(&normalized)?;
+    let image_path = workspace.join(&normalized);
+    if !image_path.exists() {
+        return Err(anyhow!("image reference `{dest_url}` does not exist"));
     }
-    Ok(())
+    Ok(normalized)
+}
+
+fn resolve_workspace_relative_image_path(
+    workspace: &Path,
+    source_file: &str,
+    dest_url: &str,
+) -> Result<String> {
+    let canonical_workspace = std::fs::canonicalize(workspace)?;
+    let source_dir = workspace.join(source_file);
+    let joined = source_dir.parent().unwrap_or(workspace).join(dest_url);
+    let canonical_image_path = std::fs::canonicalize(joined)?;
+    Ok(canonical_image_path
+        .strip_prefix(canonical_workspace)?
+        .to_string_lossy()
+        .replace('\\', "/"))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -184,14 +231,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let book = Book {
             book_id: "book-1".to_string(),
-            conversation_id: "telegram:1".to_string(),
+            conversation_id: "app:1".to_string(),
             title: "Deterministic".to_string(),
             status: BookStatus::Active,
             workspace_path: String::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        let workspace = ensure_workspace(dir.path(), "telegram:1", &book).unwrap();
+        let workspace = ensure_workspace(dir.path(), "app:1", &book).unwrap();
         let one = render_workspace(&workspace).unwrap();
         let two = render_workspace(&workspace).unwrap();
         assert_eq!(one.full_html, two.full_html);
@@ -202,5 +249,46 @@ mod tests {
         );
         assert!(one.full_html.contains("data-source-file=\"content/"));
         assert!(!one.full_html.contains("<h2>Opening</h2>"));
+    }
+
+    #[test]
+    fn normalizes_workspace_image_references_before_rendering() {
+        let dir = tempdir().unwrap();
+        let book = Book {
+            book_id: "book-1".to_string(),
+            conversation_id: "app:1".to_string(),
+            title: "Images".to_string(),
+            status: BookStatus::Active,
+            workspace_path: String::new(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let workspace = ensure_workspace(dir.path(), "app:1", &book).unwrap();
+        let image_path = workspace.join("assets/images/example.png");
+        std::fs::write(&image_path, [137, 80, 78, 71]).unwrap();
+
+        let absolute_html = markdown_to_html(
+            &workspace,
+            &format!("![alt]({})", image_path.display()),
+            "content/chapters/001-opening.md",
+        )
+        .unwrap();
+        assert!(absolute_html.contains("src=\"assets/images/example.png\""));
+
+        let root_relative_html = markdown_to_html(
+            &workspace,
+            "![alt](/assets/images/example.png)",
+            "content/chapters/001-opening.md",
+        )
+        .unwrap();
+        assert!(root_relative_html.contains("src=\"assets/images/example.png\""));
+
+        let chapter_relative_html = markdown_to_html(
+            &workspace,
+            "![alt](../../assets/images/example.png)",
+            "content/chapters/001-opening.md",
+        )
+        .unwrap();
+        assert!(chapter_relative_html.contains("src=\"assets/images/example.png\""));
     }
 }

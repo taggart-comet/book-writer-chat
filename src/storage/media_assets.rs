@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 
 use crate::core::models::{MessageAttachment, Provider};
 
-const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+const IMAGE_ATTACHMENT_BYTES_LIMIT: usize = 20 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct DownloadedMedia {
@@ -33,7 +33,7 @@ pub fn save_image_attachment(
     attachment: &MessageAttachment,
     media: DownloadedMedia,
 ) -> Result<SavedImageAttachment> {
-    if media.bytes.len() > MAX_IMAGE_BYTES {
+    if media.bytes.len() > IMAGE_ATTACHMENT_BYTES_LIMIT {
         return Err(anyhow!("image attachment exceeds the 20 MB limit"));
     }
     let mime_type = media
@@ -176,8 +176,8 @@ fn sanitize_component(value: &str) -> String {
 
 fn strip_bot_address(value: &str) -> &str {
     value
-        .strip_prefix("@bookbot")
-        .or_else(|| value.strip_prefix("/bookbot"))
+        .strip_prefix("@assistant")
+        .or_else(|| value.strip_prefix("/assistant"))
         .unwrap_or(value)
 }
 
@@ -203,7 +203,7 @@ mod tests {
             width: Some(640),
             height: Some(480),
             file_size: Some(4),
-            caption: Some("@bookbot place this diagram".to_string()),
+            caption: Some("@assistant place this diagram".to_string()),
         }
     }
 
@@ -212,7 +212,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let saved = save_image_attachment(
             dir.path(),
-            &Provider::Telegram,
+            &Provider::App,
             "../message:1",
             0,
             &attachment("image/png"),
@@ -226,18 +226,14 @@ mod tests {
 
         assert_eq!(
             saved.workspace_relative_path,
-            "assets/images/telegram-message-1-1.png"
+            "assets/images/app-message-1-1.png"
         );
         assert!(dir.path().join(&saved.workspace_relative_path).exists());
         assert_eq!(
             std::fs::read(dir.path().join(&saved.workspace_relative_path)).unwrap(),
             vec![1, 2, 3, 4]
         );
-        assert!(
-            saved
-                .markdown
-                .contains("assets/images/telegram-message-1-1.png")
-        );
+        assert!(saved.markdown.contains("assets/images/app-message-1-1.png"));
     }
 
     #[test]
@@ -253,7 +249,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let result = save_image_attachment(
             dir.path(),
-            &Provider::Telegram,
+            &Provider::App,
             &Utc::now().timestamp().to_string(),
             0,
             &attachment("image/svg+xml"),

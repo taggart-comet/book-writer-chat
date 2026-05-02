@@ -11,11 +11,11 @@ This part of the Rust backend serves the data needed by the Svelte frontend so c
 - expose frontend-consumable endpoints for book retrieval and status
 - provide the latest rendered representation of a book draft
 - expose revision and job metadata needed for UI feedback
-- generate or validate links sent back through messenger
+- generate or validate reader links used by the app
 
 ## Product Requirement
 
-After a bot-directed messenger command is processed, the conversation should receive a link that opens a web view of the current draft in a polished reading experience.
+After an in-app authoring command is processed, the user should be able to open a web view of the current draft in a polished reading experience.
 
 ## Reader Experience
 
@@ -93,7 +93,7 @@ A chunked response should include enough metadata for the frontend to continue l
 
 The cursor is opaque to the frontend and is bound to a specific revision. If the frontend sends a stale `revision_id` or a cursor from an older revision, the backend returns an explicit stale-revision error instead of silently mixing content from different renders.
 
-Rendered text spans may include source-reference attributes that identify the Markdown source file, start line/character, and end line/character for that rendered text. The frontend may use these attributes only to copy a reference for messenger-driven authoring feedback; it must not treat them as a general source-file API.
+Rendered text spans may include source-reference attributes that identify the Markdown source file, start line/character, and end line/character for that rendered text. The frontend may use these attributes only to build authoring-reference payloads; it must not treat them as a general source-file API.
 
 ### Reader Asset Endpoint
 
@@ -136,7 +136,7 @@ Example fields:
 
 ## Linking Model
 
-Messenger replies should include a stable frontend URL that identifies the conversation-owned book or current view.
+The app should expose a stable frontend URL that identifies the conversation-owned book or current view.
 
 For MVP, the reader link model is fixed as:
 
@@ -152,7 +152,7 @@ Required link behavior:
 - the backend validates the token before serving reader data
 - invalid or expired tokens return an explicit structured access error response
 
-Authentication may be added later, but MVP link delivery must already be secure enough for messenger-shared access.
+Authentication may be added later, but MVP link delivery must already be secure enough for app-shared access.
 
 ## Rendering Pipeline
 
