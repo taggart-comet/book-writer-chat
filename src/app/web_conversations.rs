@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     app::{
         auth::AuthenticatedOperator,
-        errors::api_error,
+        errors::{api_error, internal_api_error},
         state::{AppState, conversation_lock},
     },
     core::models::{MessageAttachment, MessageAttachmentKind, Provider},
@@ -79,8 +79,17 @@ pub async fn list_conversations(
     Path(book_id): Path<String>,
     State(state): State<AppState>,
 ) -> Response {
-    let Some(book) = find_book_workspace(&state.config.books_root, &book_id).unwrap_or(None) else {
-        return api_error(StatusCode::NOT_FOUND, "book_not_found", "Book not found.");
+    let book = match find_book_workspace(&state.config.books_root, &book_id) {
+        Ok(Some(book)) => book,
+        Ok(None) => return api_error(StatusCode::NOT_FOUND, "book_not_found", "Book not found."),
+        Err(error) => {
+            return internal_api_error(
+                "list_conversations.find_book_workspace",
+                &error,
+                "conversation_list_failed",
+                "Failed to list conversations.",
+            );
+        }
     };
 
     match list_conversation_records(&book.workspace_path) {
@@ -91,8 +100,9 @@ pub async fn list_conversations(
                 .collect::<Vec<_>>(),
         )
         .into_response(),
-        Err(_) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
+        Err(error) => internal_api_error(
+            "list_conversations.list_conversation_records",
+            &error,
             "conversation_list_failed",
             "Failed to list conversations.",
         ),
@@ -105,8 +115,17 @@ pub async fn create_conversation(
     State(state): State<AppState>,
     Json(payload): Json<CreateConversationRequest>,
 ) -> Response {
-    let Some(book) = find_book_workspace(&state.config.books_root, &book_id).unwrap_or(None) else {
-        return api_error(StatusCode::NOT_FOUND, "book_not_found", "Book not found.");
+    let book = match find_book_workspace(&state.config.books_root, &book_id) {
+        Ok(Some(book)) => book,
+        Ok(None) => return api_error(StatusCode::NOT_FOUND, "book_not_found", "Book not found."),
+        Err(error) => {
+            return internal_api_error(
+                "create_conversation.find_book_workspace",
+                &error,
+                "conversation_create_failed",
+                "Failed to create conversation.",
+            );
+        }
     };
 
     let title = payload
@@ -141,8 +160,9 @@ pub async fn create_conversation(
             "duplicate_conversation",
             "Conversation already exists.",
         ),
-        Err(_) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
+        Err(error) => internal_api_error(
+            "create_conversation.append_conversation_record",
+            &error,
             "conversation_create_failed",
             "Failed to create conversation.",
         ),
@@ -155,8 +175,17 @@ pub async fn submit_conversation_message(
     State(state): State<AppState>,
     multipart: Multipart,
 ) -> Response {
-    let Some(book) = find_book_workspace(&state.config.books_root, &book_id).unwrap_or(None) else {
-        return api_error(StatusCode::NOT_FOUND, "book_not_found", "Book not found.");
+    let book = match find_book_workspace(&state.config.books_root, &book_id) {
+        Ok(Some(book)) => book,
+        Ok(None) => return api_error(StatusCode::NOT_FOUND, "book_not_found", "Book not found."),
+        Err(error) => {
+            return internal_api_error(
+                "submit_conversation_message.find_book_workspace",
+                &error,
+                "conversation_submit_failed",
+                "Failed to submit conversation message.",
+            );
+        }
     };
 
     let parsed =
@@ -178,7 +207,8 @@ pub async fn submit_conversation_message(
                     "Uploaded file must be a supported image.",
                 );
             }
-            Err(ConversationMessageRequestError::Multipart) => {
+            Err(ConversationMessageRequestError::Multipart(error)) => {
+                tracing::warn!(error = %error, conversation_id, "invalid multipart message payload");
                 return api_error(
                     StatusCode::BAD_REQUEST,
                     "invalid_message",
@@ -213,9 +243,10 @@ pub async fn submit_conversation_message(
                     );
                 }
             },
-            Err(_) => {
-                return api_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
+            Err(error) => {
+                return internal_api_error(
+                    "submit_conversation_message.list_conversation_records",
+                    &error,
                     "conversation_list_failed",
                     "Failed to load conversation metadata.",
                 );
@@ -250,9 +281,10 @@ pub async fn submit_conversation_message(
                         "Conversation not found.",
                     );
                 }
-                Err(_) => {
-                    return api_error(
-                        StatusCode::INTERNAL_SERVER_ERROR,
+                Err(error) => {
+                    return internal_api_error(
+                        "submit_conversation_message.update_conversation_title",
+                        &error,
                         "conversation_update_failed",
                         "Failed to update conversation title.",
                     );
@@ -275,9 +307,10 @@ pub async fn submit_conversation_message(
                     "Conversation not found.",
                 );
             }
-            Err(_) => {
-                return api_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
+            Err(error) => {
+                return internal_api_error(
+                    "submit_conversation_message.update_conversation_status",
+                    &error,
                     "conversation_update_failed",
                     "Failed to update conversation status.",
                 );
@@ -316,8 +349,17 @@ pub async fn get_conversation_messages(
     Path((book_id, conversation_id)): Path<(String, String)>,
     State(state): State<AppState>,
 ) -> Response {
-    let Some(book) = find_book_workspace(&state.config.books_root, &book_id).unwrap_or(None) else {
-        return api_error(StatusCode::NOT_FOUND, "book_not_found", "Book not found.");
+    let book = match find_book_workspace(&state.config.books_root, &book_id) {
+        Ok(Some(book)) => book,
+        Ok(None) => return api_error(StatusCode::NOT_FOUND, "book_not_found", "Book not found."),
+        Err(error) => {
+            return internal_api_error(
+                "get_conversation_messages.find_book_workspace",
+                &error,
+                "session_log_read_failed",
+                "Failed to load conversation transcript.",
+            );
+        }
     };
 
     let conversation_status = match list_conversation_records(&book.workspace_path) {
@@ -334,9 +376,10 @@ pub async fn get_conversation_messages(
                 );
             }
         },
-        Err(_) => {
-            return api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
+        Err(error) => {
+            return internal_api_error(
+                "get_conversation_messages.list_conversation_records",
+                &error,
                 "conversation_list_failed",
                 "Failed to load conversation metadata.",
             );
@@ -369,23 +412,45 @@ pub async fn get_conversation_messages(
             "conversation_not_found",
             "Conversation not found.",
         ),
-        Err(TranscriptReadError::InvalidSessionLogPath) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "session_log_path_invalid",
-            "Conversation transcript is unavailable.",
+        Err(TranscriptReadError::InvalidSessionLogPath) => {
+            tracing::error!(conversation_id, "conversation transcript has invalid session log path");
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_log_path_invalid",
+                "Conversation transcript is unavailable.",
+            )
+        }
+        Err(TranscriptReadError::SessionLogMissing) => {
+            tracing::warn!(conversation_id, "conversation transcript session log is missing");
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_log_missing",
+                "Conversation transcript is not available yet.",
+            )
+        }
+        Err(TranscriptReadError::MalformedLogLine { line }) => {
+            tracing::error!(conversation_id, line, "conversation transcript contains malformed log line");
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "session_log_read_failed",
+                "Failed to load conversation transcript.",
+            )
+        }
+        Err(TranscriptReadError::Io(error)) => internal_api_error(
+            "get_conversation_messages.read_conversation_transcript_snapshot",
+            &error,
+            "session_log_read_failed",
+            "Failed to load conversation transcript.",
         ),
-        Err(TranscriptReadError::SessionLogMissing) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "session_log_missing",
-            "Conversation transcript is not available yet.",
+        Err(TranscriptReadError::Json(error)) => internal_api_error(
+            "get_conversation_messages.read_conversation_transcript_snapshot",
+            &error,
+            "session_log_read_failed",
+            "Failed to load conversation transcript.",
         ),
-        Err(
-            TranscriptReadError::MalformedLogLine { .. }
-            | TranscriptReadError::Io(_)
-            | TranscriptReadError::Json(_)
-            | TranscriptReadError::Other(_),
-        ) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
+        Err(TranscriptReadError::Other(error)) => internal_api_error(
+            "get_conversation_messages.read_conversation_transcript_snapshot",
+            &error,
             "session_log_read_failed",
             "Failed to load conversation transcript.",
         ),
@@ -443,11 +508,13 @@ async fn process_conversation_message(
     let _guard = lock.lock().await;
 
     let result = if let Some(session_id) = session_id {
+        tracing::info!(conversation_id, session_id, workspace = %workspace_path.display(), "resuming conversation session");
         state
             .session_launcher
             .resume(&workspace_path, &session_id, &prompt)
             .await
     } else {
+        tracing::info!(conversation_id, workspace = %workspace_path.display(), title = conversation_title, "launching conversation session");
         state
             .session_launcher
             .launch(&workspace_path, &conversation_title, &prompt)
@@ -457,22 +524,37 @@ async fn process_conversation_message(
     let now = chrono::Utc::now();
     match result {
         Ok(run) => {
-            let _ = attach_conversation_session(
+            tracing::info!(
+                conversation_id,
+                session_id = run.session_id,
+                session_log_path = %run.session_log_path.display(),
+                "conversation session completed"
+            );
+            if let Err(error) = attach_conversation_session(
                 &workspace_path,
                 &conversation_id,
                 &run.session_id,
                 &run.session_log_path.to_string_lossy(),
                 CONVERSATION_STATUS_READY,
                 Some(now),
-            );
+            ) {
+                tracing::error!(conversation_id, error = %error, "failed to attach conversation session metadata");
+            }
         }
-        Err(_) => {
-            let _ = update_conversation_status(
+        Err(error) => {
+            tracing::error!(conversation_id, workspace = %workspace_path.display(), error = %error, "conversation session failed");
+            if let Err(status_error) = update_conversation_status(
                 &workspace_path,
                 &conversation_id,
                 CONVERSATION_STATUS_FAILED,
                 Some(now),
-            );
+            ) {
+                tracing::error!(
+                    conversation_id,
+                    error = %status_error,
+                    "failed to mark conversation session as failed"
+                );
+            }
         }
     }
 }
@@ -485,12 +567,12 @@ struct ParsedConversationMessageRequest {
 enum ConversationMessageRequestError {
     InvalidMessage,
     InvalidAttachment,
-    Multipart,
+    Multipart(axum::extract::multipart::MultipartError),
 }
 
 impl From<axum::extract::multipart::MultipartError> for ConversationMessageRequestError {
-    fn from(_: axum::extract::multipart::MultipartError) -> Self {
-        Self::Multipart
+    fn from(error: axum::extract::multipart::MultipartError) -> Self {
+        Self::Multipart(error)
     }
 }
 
@@ -514,7 +596,7 @@ async fn parse_conversation_message_request(
                     field
                         .text()
                         .await
-                        .map_err(|_| ConversationMessageRequestError::Multipart)?,
+                        .map_err(ConversationMessageRequestError::Multipart)?,
                 );
             }
             "image" => {
@@ -527,7 +609,7 @@ async fn parse_conversation_message_request(
                 let bytes = field
                     .bytes()
                     .await
-                    .map_err(|_| ConversationMessageRequestError::Multipart)?
+                    .map_err(ConversationMessageRequestError::Multipart)?
                     .to_vec();
 
                 if bytes.is_empty() {

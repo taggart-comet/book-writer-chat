@@ -8,7 +8,11 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    app::{auth::AuthenticatedOperator, errors::api_error, state::AppState},
+    app::{
+        auth::AuthenticatedOperator,
+        errors::{api_error, internal_api_error},
+        state::AppState,
+    },
     core::models::BookLanguage,
     storage::web_books::{
         BookWorkspace, BookWorkspaceError, list_book_workspaces, provision_book_workspace,
@@ -46,8 +50,9 @@ pub async fn list_books(_auth: AuthenticatedOperator, State(state): State<AppSta
                 .collect::<Vec<_>>(),
         )
         .into_response(),
-        Err(_) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
+        Err(error) => internal_api_error(
+            "list_books",
+            &error,
             "book_list_failed",
             "Failed to list books.",
         ),
@@ -90,10 +95,21 @@ pub async fn create_book(
             "invalid_book_path",
             "Book title resolved to an invalid workspace path.",
         ),
-        Err(BookWorkspaceError::Io(_))
-        | Err(BookWorkspaceError::Yaml(_))
-        | Err(BookWorkspaceError::Other(_)) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
+        Err(BookWorkspaceError::Io(error)) => internal_api_error(
+            "create_book",
+            &error,
+            "book_create_failed",
+            "Failed to create book.",
+        ),
+        Err(BookWorkspaceError::Yaml(error)) => internal_api_error(
+            "create_book",
+            &error,
+            "book_create_failed",
+            "Failed to create book.",
+        ),
+        Err(BookWorkspaceError::Other(error)) => internal_api_error(
+            "create_book",
+            &error,
             "book_create_failed",
             "Failed to create book.",
         ),

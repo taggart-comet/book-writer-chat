@@ -96,6 +96,14 @@ impl RealSessionLauncher {
         use tokio::{io::AsyncReadExt, process::Command};
         use walkdir::WalkDir;
 
+        tracing::info!(
+            workspace = %workspace.display(),
+            title,
+            session_id = session_id.unwrap_or(""),
+            codex_cli_path = %self.config.codex_cli_path,
+            "starting codex exec"
+        );
+
         let mut command = Command::new(&self.config.codex_cli_path);
         command
             .args(build_codex_exec_args(
@@ -134,13 +142,44 @@ impl RealSessionLauncher {
         let stdout = stdout_task.await??;
         let stderr = stderr_task.await??;
 
+        if status.success() {
+            tracing::info!(
+                workspace = %workspace.display(),
+                title,
+                session_id = session_id.unwrap_or(""),
+                stdout = stdout.trim(),
+                stderr = stderr.trim(),
+                "codex exec completed"
+            );
+        } else {
+            tracing::error!(
+                workspace = %workspace.display(),
+                title,
+                session_id = session_id.unwrap_or(""),
+                exit_code = status.code().unwrap_or_default(),
+                stdout = stdout.trim(),
+                stderr = stderr.trim(),
+                "codex exec failed"
+            );
+        }
+
         anyhow::ensure!(
             status.success(),
             "codex session launch failed for `{title}`: {}",
             stderr.trim()
         );
 
-        let (session_id, launched_at) = parse_session_launch_output(&stdout)?;
+        let (session_id, launched_at) = parse_session_launch_output(&stdout).map_err(|error| {
+            tracing::error!(
+                workspace = %workspace.display(),
+                title,
+                stdout = stdout.trim(),
+                stderr = stderr.trim(),
+                error = %error,
+                "failed to parse codex exec output"
+            );
+            error
+        })?;
         let launched_at = launched_at.unwrap_or_else(Utc::now);
 
         let home = env::var("HOME").context("HOME is required to resolve Codex session logs")?;
@@ -160,7 +199,24 @@ impl RealSessionLauncher {
                     None
                 }
             })
-            .with_context(|| format!("failed to locate session log for `{session_id}`"))?;
+            .with_context(|| format!("failed to locate session log for `{session_id}`"))
+            .map_err(|error| {
+                tracing::error!(
+                    workspace = %workspace.display(),
+                    session_id,
+                    sessions_root = %sessions_root.display(),
+                    error = %error,
+                    "failed to locate codex session log"
+                );
+                error
+            })?;
+
+        tracing::info!(
+            workspace = %workspace.display(),
+            session_id,
+            session_log_path = %session_log_path.display(),
+            "resolved codex session log path"
+        );
 
         Ok(SessionLaunchResult {
             session_id,

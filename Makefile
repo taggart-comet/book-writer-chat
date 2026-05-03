@@ -2,7 +2,7 @@ IMAGE_NAME ?= book-writer-chat:local
 PUBLIC_BACKEND_BASE_URL ?= http://127.0.0.1:3000
 DEPLOY_TEST_PORT ?= 18080
 
-.PHONY: help up backend frontend-install frontend frontend-check seed-mock-book test check build deployment-smoke
+.PHONY: help up backend frontend-install frontend frontend-check seed-mock-book test check build build-codex build-prod deployment-smoke
 
 help:
 	@printf '%s\n' \
@@ -16,6 +16,8 @@ help:
 		'  make frontend-check    Run frontend typecheck and production build' \
 		'  make check             Run backend and frontend verification together' \
 		'  make build             Build the combined linux/amd64 deployment image' \
+		'  make build-codex       Build the linux/amd64 Codex CLI bundle binary' \
+		'  make build-prod        Build the copy-to-server production bundle' \
 		'  make deployment-smoke  Build and smoke test the combined container'
 
 up:
@@ -43,6 +45,12 @@ check: test frontend-check
 
 build:
 	docker build -f build/Dockerfile -t $(IMAGE_NAME) .
+
+build-codex:
+	./build/build-codex.sh
+
+build-prod:
+	./build/build-prod.sh
 
 deployment-smoke:
 	./build/deployment-smoke-test.sh

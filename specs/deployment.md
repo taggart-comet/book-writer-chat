@@ -14,22 +14,25 @@ The concrete deployment implementation may differ because this project uses Rust
 
 ## High-Level Deployment Model
 
-The application should be deployed as a single Docker image that contains the full runnable application stack.
+The default production deployment should be a single copied application bundle on one `linux/amd64` machine.
 
-That combined image should include:
+That bundle should include:
 
-- the Rust backend application
+- the Rust backend application binary
 - the built Svelte frontend assets
-- Caddy for HTTPS termination and request routing
+- a Caddy configuration file
+- a startup script that launches the backend and Caddy together
+- a sample `.env` file
+- a `systemd` service file
 
 This means deployment should not require separate frontend and backend containers in the default production path.
 
-## Combined Container Responsibility
+## Combined Bundle Responsibility
 
-The combined container should be responsible for:
+The copied bundle should be responsible for:
 
 - running the Rust backend service
-- serving the built frontend
+- serving the built frontend through Caddy
 - terminating HTTPS certificates through Caddy
 - routing API traffic to the backend
 - routing browser traffic to the frontend assets
@@ -51,55 +54,58 @@ At a high level, the expected behavior is:
 
 ## Expected Runtime Shape
 
-The intended runtime shape inside the deployed image is:
+The intended runtime shape on the deployed host is:
 
-1. Caddy listens on the public HTTPS port.
-2. The Rust backend listens on an internal application port.
-3. The built Svelte frontend is available as static output or equivalent build artifacts.
-4. Caddy proxies backend routes and serves the frontend for application routes.
+1. `systemd` starts one launch script from the copied bundle.
+2. Caddy listens on the public HTTPS port.
+3. The Rust backend listens on an internal application port.
+4. The built Svelte frontend is available on disk as static output.
+5. Caddy proxies backend routes and serves the frontend for application routes.
 
 ## Rust Adaptation Of The Reference Pattern
 
 The reference project uses Python, but this project should apply the same pattern with Rust:
 
-- use a multi-stage Docker build
-- build the Rust backend binary in a builder stage
-- build the Svelte frontend in a frontend build stage
-- assemble the runtime image with the backend binary, built frontend assets, and Caddy configuration
+- build the Rust backend binary for `linux/amd64`
+- build the Svelte frontend in a frontend build step
+- assemble a copy-to-server bundle with the backend binary, built frontend assets, Caddy configuration, startup script, and deployment templates
 
-This keeps the final image smaller and avoids shipping build toolchains in the runtime layer.
+This keeps the production machine free of build toolchains and avoids a container runtime in the default path.
 
 ## Suggested Build Structure
 
-The exact file paths can be decided later, but the repository should have a deployment-oriented build area that contains at least:
+The repository should have a deployment-oriented build area that contains at least:
 
-- a combined Dockerfile
 - a Caddyfile
-- any entrypoint or process-launch script needed to run Caddy and the backend together
+- a launch script
+- a production `.env` example
+- a `systemd` service template
+- a build script that assembles the production bundle
 
 A likely layout is something like:
 
 ```text
 build/
-  Dockerfile
   Caddyfile
-  entrypoint.sh
+  run-prod.sh
+  .env.production.example
+  book-writer-chat.service
+  build-prod.sh
 ```
 
-## Process Model Inside The Container
+## Process Model On The Host
 
-Because the deployment target is a single image running multiple application concerns, the runtime must start both:
+Because the deployment target is one copied bundle running multiple application concerns, the runtime must start both:
 
 - Caddy
 - the Rust backend
 
-The implementation may use:
+The implementation should use:
 
-- a small entrypoint script
-- a lightweight process supervisor
-- another simple and explicit multi-process startup strategy
+- a small startup script
+- `systemd` as the long-running process owner
 
-The exact mechanism is not yet fixed, but it should stay operationally simple.
+The mechanism should stay operationally simple.
 
 ## Environment Configuration
 
@@ -115,14 +121,13 @@ The final set of environment variables will be specified later, but the deployme
 
 ## Local Data Considerations
 
-The runtime may need mounted or persistent storage for local book workspaces and related generated data.
+The runtime needs persistent host directories for local book workspaces and related generated data.
 
 That should include at least:
 
 - local book workspace data under the chosen books root
+- application state data
 - Caddy data required for certificates and state
-
-The exact volume layout will be specified later.
 
 ## Makefile Requirements
 
@@ -149,13 +154,15 @@ This command is for local development, not necessarily for production-like Docke
 
 ## `make build`
 
-`make build` should build the combined Docker image for the full application.
+`make build` may remain available for the combined Docker image, but the default production path should use a dedicated production-bundle command such as `make build-prod`.
 
-Its goal is to produce the single deployable image containing:
+Its goal is to produce a copy-to-server bundle containing:
 
-- the Rust backend
+- the Rust backend binary
 - the built frontend
-- Caddy configuration and runtime components
+- Caddy configuration
+- the launch script
+- deployment templates
 
 ## Relationship To The Reference Project
 
@@ -171,10 +178,10 @@ It should not blindly copy the Python-specific implementation details.
 
 This document does not yet lock down:
 
-- the exact Docker base images
-- the exact process supervisor or entrypoint implementation
-- the exact volume mounts
-- the final cloud registry or hosting provider
+- the exact build host or CI environment
+- the exact Caddy package source
+- the exact host directory layout beyond the required data roots
+- the final cloud hosting provider
 - the final CI/CD pipeline
 
 ## Open Questions

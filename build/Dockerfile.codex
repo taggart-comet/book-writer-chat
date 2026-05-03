@@ -1,0 +1,31 @@
+FROM --platform=linux/amd64 rust:1.93-bookworm
+
+ARG CODEX_GIT_URL=https://github.com/openai/codex.git
+ARG CODEX_GIT_REF=main
+ARG CODEX_BUILD_JOBS=0
+
+WORKDIR /workspace
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        git \
+        libcap-dev \
+        libssl-dev \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone "$CODEX_GIT_URL" codex
+
+WORKDIR /workspace/codex/codex-rs
+
+RUN git checkout "$CODEX_GIT_REF"
+
+RUN if [ "$CODEX_BUILD_JOBS" = "0" ]; then \
+      cargo build -p codex-cli --release; \
+    else \
+      cargo build -p codex-cli --release -j "$CODEX_BUILD_JOBS"; \
+    fi \
+    && mkdir -p /out \
+    && cp /workspace/codex/codex-rs/target/release/codex /out/codex

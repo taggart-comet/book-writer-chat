@@ -4,6 +4,7 @@ use anyhow::Result;
 use axum::{
     Router,
     http::{HeaderValue, Method, Uri},
+    middleware,
     response::Html,
     routing::get,
 };
@@ -19,6 +20,7 @@ use crate::{
         metrics::Metrics,
         state::{AppState, RealSessionLauncher},
         web_books, web_conversations,
+        logging::log_request,
     },
     core::config::Config,
     reader::handlers::{reader_asset, reader_content, reader_job, reader_revision, reader_summary},
@@ -60,6 +62,7 @@ pub async fn build_router(config: Config) -> Result<Router> {
         .route("/api/reader/:book_id/revision", get(reader_revision))
         .route("/api/reader/:book_id/job", get(reader_job))
         .layer(cors)
+        .layer(middleware::from_fn(log_request))
         .with_state(state);
 
     if config.frontend_dist_dir.exists() {
@@ -79,7 +82,10 @@ pub async fn ready(
 ) -> axum::http::StatusCode {
     match state.config.ensure_directories() {
         Ok(_) => axum::http::StatusCode::OK,
-        Err(_) => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        Err(error) => {
+            tracing::error!(error = %error, "readiness check failed");
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        }
     }
 }
 

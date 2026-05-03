@@ -35,6 +35,9 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self> {
         let cwd = env::current_dir().context("failed to resolve current working directory")?;
+        if env::var_os("APP_SKIP_DOTENV").is_none() {
+            load_dotenv_if_present(&cwd.join(".env"))?;
+        }
         let environment = match env::var("APP_ENV")
             .unwrap_or_else(|_| "development".to_string())
             .to_lowercase()
@@ -116,6 +119,58 @@ impl Config {
         std::fs::create_dir_all(&self.books_root)?;
         Ok(())
     }
+}
+
+fn load_dotenv_if_present(path: &Path) -> Result<()> {
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return Ok(());
+    };
+
+    for (index, raw_line) in contents.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let Some((raw_key, raw_value)) = line.split_once('=') else {
+            anyhow::bail!(
+                "invalid .env line {} in {}: expected KEY=VALUE",
+                index + 1,
+                path.display()
+            );
+        };
+
+        let key = raw_key.trim();
+        anyhow::ensure!(
+            !key.is_empty(),
+            "invalid .env line {} in {}: missing key",
+            index + 1,
+            path.display()
+        );
+
+        if env::var_os(key).is_some() {
+            continue;
+        }
+
+        unsafe {
+            env::set_var(key, parse_dotenv_value(raw_value.trim()));
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_dotenv_value(value: &str) -> String {
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        let quoted_with_single_quotes = bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'';
+        let quoted_with_double_quotes = bytes[0] == b'"' && bytes[value.len() - 1] == b'"';
+        if quoted_with_single_quotes || quoted_with_double_quotes {
+            return value[1..value.len() - 1].to_string();
+        }
+    }
+
+    value.to_string()
 }
 
 fn resolve_path(cwd: &Path, value: &str) -> PathBuf {
@@ -211,6 +266,7 @@ mod tests {
             "APP_PORT",
             "APP_BOOKS_ROOT",
             "APP_DATA_DIR",
+            "APP_SKIP_DOTENV",
             "FRONTEND_DIST_DIR",
             "FRONTEND_BASE_URL",
             "WEB_AUTH_USERNAME",
@@ -218,6 +274,10 @@ mod tests {
             "JWT_SIGNING_SECRET",
         ] {
             unsafe { env::remove_var(key) };
+        }
+
+        unsafe {
+            env::set_var("APP_SKIP_DOTENV", "1");
         }
     }
 
@@ -348,5 +408,38 @@ mod tests {
         let error = Config::from_env().unwrap_err();
 
         assert!(error.to_string().contains("JWT_SIGNING_SECRET is required"));
+    }
+
+    #[test]
+    fn loads_missing_values_from_dotenv_file() {
+        let _guard = env_lock();
+        clear_env();
+        unsafe {
+            env::remove_var("APP_SKIP_DOTENV");
+        }
+
+        let original_cwd = env::current_dir().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp_dir.path().join(".env"),
+            concat!(
+                "APP_ENV=production\n",
+                "FRONTEND_BASE_URL=https://books.example.com\n",
+                "WEB_AUTH_USERNAME=operator\n",
+                "WEB_AUTH_PASSWORD=secret-password\n",
+                "JWT_SIGNING_SECRET=jwt-test-secret\n",
+            ),
+        )
+        .unwrap();
+
+        env::set_current_dir(temp_dir.path()).unwrap();
+        let config = Config::from_env().unwrap();
+        env::set_current_dir(original_cwd).unwrap();
+
+        assert_eq!(config.environment, AppEnvironment::Production);
+        assert_eq!(config.frontend_base_url, "https://books.example.com");
+        assert_eq!(config.web_auth_username, "operator");
+        assert_eq!(config.web_auth_password, "secret-password");
+        assert_eq!(config.jwt_signing_secret, "jwt-test-secret");
     }
 }

@@ -1,5 +1,5 @@
 {$CADDY_SITE_ADDRESS::8080} {
-	root * /app/frontend/build
+	root * {$FRONTEND_DIST_DIR}
 
 	handle /api/* {
 		reverse_proxy {$BACKEND_UPSTREAM}

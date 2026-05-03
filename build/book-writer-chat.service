@@ -1,0 +1,15 @@
+[Unit]
+Description=book-writer-chat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/book-writer-chat
+ExecStart=/opt/book-writer-chat/run-prod.sh
+Restart=always
+RestartSec=2
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

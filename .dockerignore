@@ -1,0 +1,13 @@
+target
+frontend/node_modules
+frontend/.svelte-kit
+frontend/build
+build/bin
+.git
+.idea
+data
+books-data
+.env
+.env.local
+frontend/.env
+frontend/.env.local

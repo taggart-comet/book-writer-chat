@@ -8,5 +8,6 @@
 /frontend/.env
 /frontend/.env.local
 /build/.caddy
+/build/bin
 /.env
 /.env.local
